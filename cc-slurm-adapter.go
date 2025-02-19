@@ -19,7 +19,7 @@ func main() {
 	flag.BoolVar(&daemon, "daemon", false, "Start cc-slurm-adapter daemon. Prolog and Epilog calls require a running daemon.")
 
 	var debugLevel int
-	flag.IntVar(&debugLevel, "debugLevel", 0, "Set log level")
+	flag.IntVar(&debugLevel, "debugLevel", 2, "Set log level")
 
 	flag.Parse()
 

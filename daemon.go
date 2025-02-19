@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"io"
 	"strings"
 	"time"
 	"context"
@@ -65,7 +66,12 @@ func DaemonMain() error {
 				trace.Debugf("ERROR: %s", err)
 			}
 		} else {
-			trace.Debugf("Accept successful")
+			trace.Debug("Accept successful")
+			msg, err := ConnectionReadAll(con)
+			if err != nil {
+				return fmt.Errorf("Failed to process message: %w", err)
+			}
+			trace.Debugf("%s\n", msg)
 			con.Close()
 		}
 	}
@@ -112,4 +118,22 @@ func SocketClose() {
 	ipcSocket.Close()
 	os.Remove(PID_FILE_PATH)
 	os.Remove(IPC_SOCK_PATH)
+}
+
+func ConnectionReadAll(con net.Conn) (string, error) {
+	message := ""
+	block := make([]byte, 512)
+
+	for {
+		bytes, err := con.Read(block)
+		if err != nil && err != io.EOF {
+			return message, fmt.Errorf("Failed to read bytes on Unix Socket: %w", err)
+		}
+		message += string(block[:bytes])
+		if err == io.EOF {
+			break
+		}
+	}
+
+	return message, nil
 }
