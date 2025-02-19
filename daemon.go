@@ -16,6 +16,7 @@ import (
 const (
 	PID_FILE_PATH string = "/run/cc-slurm-adapter/daemon.pid"
 	IPC_SOCK_PATH        = "/run/cc-slurm-adapter/daemon.sock"
+	TIMER_RATE    int    = 10
 )
 
 var (
@@ -46,11 +47,16 @@ func DaemonMain() error {
 	running := true
 	for running {
 		unixListener, _ := ipcSocket.(*net.UnixListener)
-		unixListener.SetDeadline(time.Now().Add(1 * time.Second))
+		unixListener.SetDeadline(time.Now().Add(time.Duration(TIMER_RATE) * time.Second))
 
 		trace.Debug("socket.Accept()")
 		con, err := ipcSocket.Accept()
 		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				trace.Debug("TIMEOUT")
+				continue
+			}
+
 			select {
 			case <-ctx.Done():
 				trace.Debug("Cancelling Accept() via Signal")
