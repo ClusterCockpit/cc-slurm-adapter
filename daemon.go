@@ -6,6 +6,9 @@ import (
 	"os"
 	"strings"
 	"time"
+	"context"
+	"os/signal"
+	"syscall"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
@@ -28,7 +31,38 @@ func DaemonMain() error {
 		return err
 	}
 
-	time.Sleep(10 * time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		trace.Debug("Received signal, shutting down...")
+		cancel()
+		ipcSocket.Close()
+	}()
+
+	running := true
+	for running {
+		unixListener, _ := ipcSocket.(*net.UnixListener)
+		unixListener.SetDeadline(time.Now().Add(1 * time.Second))
+
+		trace.Debug("socket.Accept()")
+		con, err := ipcSocket.Accept()
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				trace.Debug("Cancelling Accept() via Signal")
+				running = false
+			default:
+				trace.Debugf("ERROR: %s", err)
+			}
+		} else {
+			trace.Debugf("Accept successful")
+			con.Close()
+		}
+	}
 
 	return nil
 }
@@ -55,13 +89,11 @@ func SocketOpen() error {
 		return fmt.Errorf("Unable to create pid file: %w", err)
 	}
 
-	_ = os.Remove(IPC_SOCK_PATH)
-	ipcSocket, err := net.Listen("unix", IPC_SOCK_PATH)
+	os.Remove(IPC_SOCK_PATH)
+	ipcSocket, err = net.Listen("unix", IPC_SOCK_PATH)
 	if err != nil {
 		return fmt.Errorf("Unable to create socket (is there an existing socket with bad permissions?): %w", err)
 	}
-
-	_ = ipcSocket
 
 	return nil
 }
@@ -71,6 +103,7 @@ func SocketClose() {
 
 	/* While we can handle orphaned pid files and sockets,
 	 * we should clean them up after we're done. */
-	_ = os.Remove(PID_FILE_PATH)
-	_ = os.Remove(IPC_SOCK_PATH)
+	ipcSocket.Close()
+	os.Remove(PID_FILE_PATH)
+	os.Remove(IPC_SOCK_PATH)
 }
