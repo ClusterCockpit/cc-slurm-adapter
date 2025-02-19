@@ -1,5 +1,7 @@
 package main
 
-func EpilogMain() {
+func EpilogMain() error {
 	println("EpilogMain")
+
+	return nil
 }

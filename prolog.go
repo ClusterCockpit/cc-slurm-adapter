@@ -1,5 +1,7 @@
 package main
 
-func PrologMain() {
+func PrologMain() error {
 	println("PrologMain")
+
+	return nil
 }

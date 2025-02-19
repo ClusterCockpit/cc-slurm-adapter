@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"os"
+	"fmt"
+
+	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
 
 func main() {
@@ -16,21 +19,35 @@ func main() {
 	flag.BoolVar(&daemon, "daemon", false, "Start cc-slurm-adapter daemon. Prolog and Epilog calls require a running daemon.")
 
 	var debugLevel int
-	flag.IntVar(&debugLevel, "debug", 0, "Set debug level")
+	flag.IntVar(&debugLevel, "debugLevel", 0, "Set log level")
 
 	flag.Parse()
 
+	trace.SetLevel(debugLevel)
+
+	var err error
+	var mode string
+
 	if prolog && epilog {
-		println("Prolog and Epilog must not be used at the same time")
-		os.Exit(1)
+		err = fmt.Errorf("Prolog and Epilog must not be used at the same time")
 	} else if prolog {
-		PrologMain()
+		mode = "Prolog"
+		err = PrologMain()
 	} else if epilog {
-		EpilogMain()
+		mode = "Epilog"
+		err = EpilogMain()
 	} else if daemon {
-		DaemonMain()
+		mode = "Daemon"
+		err = DaemonMain()
 	} else {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
+
+	if err != nil {
+		trace.Errorf("Main function encountered an error: %v", err)
+		os.Exit(1)
+	}
+
+	trace.Infof("cc-slurm-adapter (%s) terminated sucessfully", mode)
 }
