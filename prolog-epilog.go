@@ -89,7 +89,7 @@ func CollectEnvironmentValues() (PrologEpilogSlurmctldEnv, error) {
 func PrologEpilogMain() error {
 	trace.Info("Starting Prolog")
 
-	con, err := net.Dial("unix", IPC_SOCK_PATH)
+	con, err := net.Dial("unix", Config.IpcSockPath)
 	if err != nil {
 		return fmt.Errorf("Unable to connect to the daemon's unix socket. Is the daemon running?: %w", err)
 	}

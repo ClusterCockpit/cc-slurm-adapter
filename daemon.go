@@ -12,25 +12,36 @@ import (
 	"syscall"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
+	"github.com/ClusterCockpit/cc-backend/pkg/schema"
+
+	"database/sql"
+	_ "github.com/mattn/go-sqlite3"
 )
 
-const (
-	PID_FILE_PATH string = "/run/cc-slurm-adapter/daemon.pid"
-	IPC_SOCK_PATH        = "/run/cc-slurm-adapter/daemon.sock"
-	TIMER_RATE    int    = 10
-)
+type StopJob struct {
+	JobId 	  int64	           `json:"jobId" db:"job_id"`
+	Cluster   string           `json:"cluster" db:"cluster"`
+	StartTime int64            `json:"startTime" db:"start_time"`
+	State     schema.JobState  `json:"jobState" db:"state"`
+	StopTime  int64            `json:"stopTime" db:"stop_time"`
+}
 
 var (
-	ipcSocket net.Listener
+	ipcSocket        net.Listener
+	db               *sql.DB
+
+	incompleteJobs   []schema.BaseJob
+	pendingStartJobs []schema.BaseJob
+	pendingStopJobs  []StopJob
 )
 
 func DaemonMain() error {
 	trace.Info("Starting Daemon")
 
-	err := SocketOpen()
-	defer SocketClose()
+	err := DaemonInit()
+	defer DaemonQuit()
 	if err != nil {
-		return err
+		return fmt.Errorf("Unable to initialize Daemon: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -48,7 +59,7 @@ func DaemonMain() error {
 	running := true
 	for running {
 		unixListener, _ := ipcSocket.(*net.UnixListener)
-		unixListener.SetDeadline(time.Now().Add(time.Duration(TIMER_RATE) * time.Second))
+		unixListener.SetDeadline(time.Now().Add(time.Duration(Config.SlurmPollSeconds) * time.Second))
 
 		trace.Debug("socket.Accept()")
 		con, err := ipcSocket.Accept()
@@ -79,7 +90,7 @@ func DaemonMain() error {
 	return nil
 }
 
-func SocketOpen() error {
+func DaemonInit() error {
 	trace.Debug("Opening Socket")
 
 	/* First check, if another daemon instance is already running.
@@ -87,7 +98,7 @@ func SocketOpen() error {
 	 * If it is still running, raise an error. If it is not running,
 	 * the pid file is orphaned, and can be deleted. If no pid file exists
 	 * we can safely start the daemon immediately. */
-	pidFileContent, err := os.ReadFile(PID_FILE_PATH)
+	pidFileContent, err := os.ReadFile(Config.PidFilePath)
 	if err == nil {
 		trimmedPidFileContent := strings.TrimSpace(string(pidFileContent))
 		_, err := os.Stat(fmt.Sprintf("/proc/%s", trimmedPidFileContent))
@@ -96,28 +107,42 @@ func SocketOpen() error {
 		}
 	}
 
-	err = os.WriteFile(PID_FILE_PATH, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	err = os.WriteFile(Config.PidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
 	if err != nil {
 		return fmt.Errorf("Unable to create pid file: %w", err)
 	}
 
-	os.Remove(IPC_SOCK_PATH)
-	ipcSocket, err = net.Listen("unix", IPC_SOCK_PATH)
+	os.Remove(Config.IpcSockPath)
+	ipcSocket, err = net.Listen("unix", Config.IpcSockPath)
 	if err != nil {
 		return fmt.Errorf("Unable to create socket (is there an existing socket with bad permissions?): %w", err)
+	}
+
+	/* Init Database connection */
+	trace.Debugf("Opening database: %s", Config.DbPath)
+	db, err = sql.Open("sqlite3", Config.DbPath)
+	if err != nil {
+		return fmt.Errorf("Unable to open database: %w", err)
 	}
 
 	return nil
 }
 
-func SocketClose() {
+func DaemonQuit() {
 	trace.Debug("Closing Socket")
+
+	/* Deinit Database connection */
+	if db != nil {
+		db.Close()
+	}
 
 	/* While we can handle orphaned pid files and sockets,
 	 * we should clean them up after we're done. */
-	ipcSocket.Close()
-	os.Remove(PID_FILE_PATH)
-	os.Remove(IPC_SOCK_PATH)
+	if ipcSocket != nil {
+		ipcSocket.Close()
+	}
+	os.Remove(Config.PidFilePath)
+	os.Remove(Config.IpcSockPath)
 }
 
 func ConnectionReadAll(con net.Conn) (string, error) {

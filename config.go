@@ -13,6 +13,7 @@ const (
 
 	DEFAULT_PID_FILE_PATH          = "/run/cc-slurm-adapter/daemon.pid"
 	DEFAULT_IPC_SOCK_PATH          = "/run/cc-slurm-adapter/daemon.sock"
+	DEFAULT_DB_PATH                = "/var/lib/cc-slurm-adapter/jobs.db"
 	DEFAULT_SLURM_POLL_SECONDS int = 60
 )
 
@@ -23,6 +24,7 @@ var (
 type ProgramConfig struct {
 	PidFilePath string   `json:"pidFilePath"`
 	IpcSockPath string   `json:"ipcSocketPath"`
+	DbPath string        `json:"dbPath"`
 	SlurmPollSeconds int `json:"slurmPollSeconds"`
 }
 
@@ -35,6 +37,7 @@ func LoadConfig(configPath string) error {
 	newConf := ProgramConfig{
 		PidFilePath: DEFAULT_PID_FILE_PATH,
 		IpcSockPath: DEFAULT_IPC_SOCK_PATH,
+		DbPath: DEFAULT_DB_PATH,
 		SlurmPollSeconds: DEFAULT_SLURM_POLL_SECONDS,
 	}
 
