@@ -44,7 +44,7 @@ func Error(msg string) {
 
 func Errorf(fmtStr string, v ...any) {
 	if debugLevel >= ERROR {
-		log.Print(format(fmtStr, v))
+		log.Print(format(fmtStr, v...))
 	}
 }
 
@@ -56,7 +56,7 @@ func Warn(msg string) {
 
 func Warnf(fmtStr string, v ...any) {
 	if debugLevel >= WARN {
-		log.Print(format(fmtStr, v))
+		log.Print(format(fmtStr, v...))
 	}
 }
 
@@ -68,7 +68,7 @@ func Info(msg string) {
 
 func Infof(fmtStr string, v ...any) {
 	if debugLevel >= INFO {
-		log.Print(format(fmtStr, v))
+		log.Print(format(fmtStr, v...))
 	}
 }
 
@@ -80,6 +80,6 @@ func Debug(msg string) {
 
 func Debugf(fmtStr string, v ...any) {
 	if debugLevel >= DEBUG {
-		log.Print(format(fmtStr, v))
+		log.Print(format(fmtStr, v...))
 	}
 }
