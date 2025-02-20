@@ -10,6 +10,7 @@ import (
 	"context"
 	"os/signal"
 	"syscall"
+	"encoding/json"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
@@ -44,10 +45,10 @@ func DaemonMain() error {
 	trace.Info("Starting Daemon")
 
 	err := daemonInit()
-	defer daemonQuit()
 	if err != nil {
 		return fmt.Errorf("Unable to initialize Daemon: %w", err)
 	}
+	defer daemonQuit()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -61,8 +62,8 @@ func DaemonMain() error {
 		ipcSocket.Close()
 	}()
 
-	running := true
-	for running {
+outer_break:
+	for {
 		unixListener, _ := ipcSocket.(*net.UnixListener)
 		unixListener.SetDeadline(time.Now().Add(time.Duration(Config.SlurmPollSeconds) * time.Second))
 
@@ -77,19 +78,21 @@ func DaemonMain() error {
 			select {
 			case <-ctx.Done():
 				trace.Debug("Cancelling Accept() via Signal")
-				running = false
+				break outer_break
 			default:
 				trace.Debugf("ERROR: %s", err)
+				continue
 			}
-		} else {
-			trace.Debug("Accept successful")
-			msg, err := connectionReadAll(con)
-			if err != nil {
-				return fmt.Errorf("Failed to process message: %w", err)
-			}
-			trace.Debugf("%s\n", msg)
-			con.Close()
 		}
+
+		defer con.Close()
+
+		trace.Debug("Accept successful")
+		msg, err := connectionReadAll(con)
+		if err != nil {
+			return fmt.Errorf("Failed to process message: %w", err)
+		}
+		jobPrologEpilogNotify(msg)
 	}
 
 	return nil
@@ -120,6 +123,7 @@ func daemonInit() error {
 	os.Remove(Config.IpcSockPath)
 	ipcSocket, err = net.Listen("unix", Config.IpcSockPath)
 	if err != nil {
+		os.Remove(Config.PidFilePath)
 		return fmt.Errorf("Unable to create socket (is there an existing socket with bad permissions?): %w", err)
 	}
 
@@ -127,6 +131,9 @@ func daemonInit() error {
 	trace.Debugf("Opening database: %s", Config.DbPath)
 	db, err = sql.Open("sqlite3", Config.DbPath)
 	if err != nil {
+		ipcSocket.Close()
+		os.Remove(Config.IpcSockPath)
+		os.Remove(Config.PidFilePath)
 		return fmt.Errorf("Unable to open database: %w", err)
 	}
 
@@ -134,10 +141,28 @@ func daemonInit() error {
 	trace.Debugf("Assert required tables exist")
 	err = createDbTables()
 	if err != nil {
+		db.Close()
+		ipcSocket.Close()
+		os.Remove(Config.IpcSockPath)
+		os.Remove(Config.PidFilePath)
 		return fmt.Errorf("Unable to create tables in database: %w", err)
 	}
 
 	trace.Debugf("Initialization complete")
+	return nil
+}
+
+func jobPrologEpilogNotify(ipcMsg []byte) error {
+	/* The message received contains a JSON, which contains all relevant
+	 * environment variables from here:
+	 * https://slurm.schedmd.com/prolog_epilog.html */
+	var env PrologEpilogSlurmctldEnv
+	err := json.Unmarshal(ipcMsg, env)
+	if err != nil {
+		return fmt.Errorf("Unable to parse IPC message as JSON (%w). Either a 3rd party is writing yo our Unix socket or there is a bug in the IPC procotocl.", err)
+	}
+
+	_ = env
 	return nil
 }
 
@@ -218,22 +243,21 @@ func createDbTables() error {
 func daemonQuit() {
 	/* Deinit Database connection */
 	trace.Debug("Closing Database")
-	if db != nil {
-		db.Close()
-	}
+	db.Close()
 
 	/* While we can handle orphaned pid files and sockets,
-	 * we should clean them up after we're done. */
+	 * we should clean them up after we're done.
+	 * The PID check is also not 100% reliable, since we just
+	 * check against any process with that PID and not if it
+	 * actually is the daemon... */
 	trace.Debug("Closing Socket")
-	if ipcSocket != nil {
-		ipcSocket.Close()
-	}
-	os.Remove(Config.PidFilePath)
+	ipcSocket.Close()
 	os.Remove(Config.IpcSockPath)
+	os.Remove(Config.PidFilePath)
 }
 
-func connectionReadAll(con net.Conn) (string, error) {
-	message := ""
+func connectionReadAll(con net.Conn) ([]byte, error) {
+	message := make([]byte, 0)
 	block := make([]byte, 512)
 
 	for {
@@ -241,7 +265,7 @@ func connectionReadAll(con net.Conn) (string, error) {
 		if err != nil && err != io.EOF {
 			return message, fmt.Errorf("Failed to read bytes on Unix Socket: %w", err)
 		}
-		message += string(block[:bytes])
+		message = append(message, block[:bytes]...)
 		if err == io.EOF {
 			break
 		}
