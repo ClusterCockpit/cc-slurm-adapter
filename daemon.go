@@ -18,28 +18,33 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+type StartJob struct {
+	schema.BaseJob
+	StartTime time.Time
+}
+
 type StopJob struct {
-	JobId 	  int64	           `json:"jobId" db:"job_id"`
-	Cluster   string           `json:"cluster" db:"cluster"`
+	JobId 	  int64	           `json:"jobId"     db:"job_id"`
+	Cluster   string           `json:"cluster"   db:"cluster"`
 	StartTime int64            `json:"startTime" db:"start_time"`
-	State     schema.JobState  `json:"jobState" db:"state"`
-	StopTime  int64            `json:"stopTime" db:"stop_time"`
+	State     schema.JobState  `json:"jobState"  db:"state"`
+	StopTime  int64            `json:"stopTime"  db:"stop_time"`
 }
 
 var (
-	ipcSocket        net.Listener
-	db               *sql.DB
+	ipcSocket           net.Listener
+	db                  *sql.DB
 
-	incompleteJobs   []schema.BaseJob
-	pendingStartJobs []schema.BaseJob
-	pendingStopJobs  []StopJob
+	incompleteStartJobs []StartJob
+	pendingStartJobs    []StartJob
+	pendingStopJobs     []StopJob
 )
 
 func DaemonMain() error {
 	trace.Info("Starting Daemon")
 
-	err := DaemonInit()
-	defer DaemonQuit()
+	err := daemonInit()
+	defer daemonQuit()
 	if err != nil {
 		return fmt.Errorf("Unable to initialize Daemon: %w", err)
 	}
@@ -78,7 +83,7 @@ func DaemonMain() error {
 			}
 		} else {
 			trace.Debug("Accept successful")
-			msg, err := ConnectionReadAll(con)
+			msg, err := connectionReadAll(con)
 			if err != nil {
 				return fmt.Errorf("Failed to process message: %w", err)
 			}
@@ -90,7 +95,7 @@ func DaemonMain() error {
 	return nil
 }
 
-func DaemonInit() error {
+func daemonInit() error {
 	trace.Debug("Opening Socket")
 
 	/* First check, if another daemon instance is already running.
@@ -125,10 +130,92 @@ func DaemonInit() error {
 		return fmt.Errorf("Unable to open database: %w", err)
 	}
 
+	/* Assert required tables exist in database. */
+	trace.Debugf("Assert required tables exist")
+	err = createDbTables()
+	if err != nil {
+		return fmt.Errorf("Unable to create tables in database: %w", err)
+	}
+
+	trace.Debugf("Initialization complete")
 	return nil
 }
 
-func DaemonQuit() {
+func createDbTables() error {
+	/* Three main tables exist currently:
+	 * - incomplete_start_jobs (jobs requiring more info from Slurm)
+	 * - pending_start_jobs (jobs which haven't been submitted to cc-backend REST yet)
+	 * - pending_stop_jobs (jobs which haven't been submitted to cc-backend REST yet) */
+
+	incomplete_start_jobs_schema := `
+	CREATE TABLE IF NOT EXISTS incomplete_start_jobs (
+	  cluster VARCHAR(255) NOT NULL,
+	  sub_cluster VARCHAR(255) NOT NULL,
+	  partition VARCHAR(255) NOT NULL,
+	  project VARCHAR(255) NOT NULL,
+	  user VARCHAR(255) NOT NULL,
+	  state VARCHAR(255) NOT NULL,
+	  array_job_id INTEGER NOT NULL,
+	  job_id INTEGER PRIMARY_KEY NOT NULL,
+	  num_nodes INTEGER NOT NULL,
+	  num_hwthreads INTEGER NOT NULL,
+	  resources TEXT NOT NULL,
+	  exclusive INTEGER NOT NULL,
+	  start_time INTEGER NOT NULL,
+	  walltime INTEGER NOT NULL,
+	  job_script VARCHAR(255) NOT NULL,
+	  job_name VARCHAR(255) NOT NULL,
+	  slurm_info TEXT NOT NULL
+	);`
+
+	_, err := db.Exec(incomplete_start_jobs_schema)
+	if err != nil {
+		return fmt.Errorf("Unable to create table: %w", err)
+	}
+	
+	pending_start_jobs_schema := `
+	CREATE TABLE IF NOT EXISTS incomplete_jobs (
+	  cluster VARCHAR(255) NOT NULL,
+	  sub_cluster VARCHAR(255) NOT NULL,
+	  partition VARCHAR(255) NOT NULL,
+	  project VARCHAR(255) NOT NULL,
+	  user VARCHAR(255) NOT NULL,
+	  state VARCHAR(255) NOT NULL,
+	  array_job_id INTEGER NOT NULL,
+	  job_id INTEGER PRIMARY_KEY NOT NULL,
+	  num_nodes INTEGER NOT NULL,
+	  num_hwthreads INTEGER NOT NULL,
+	  resources TEXT NOT NULL,
+	  exclusive INTEGER NOT NULL,
+	  start_time INTEGER NOT NULL,
+	  walltime INTEGER NOT NULL,
+	  job_script VARCHAR(255) NOT NULL,
+	  job_name VARCHAR(255) NOT NULL,
+	  slurm_info TEXT NOT NULL
+	);`
+
+	_, err = db.Exec(pending_start_jobs_schema)
+	if err != nil {
+		return fmt.Errorf("Unable to create table: %w", err)
+	}
+
+	pending_stop_jobs_schema := `
+	CREATE TABLE IF NOT EXISTS pending_stop_jobs (
+	  job_id INTEGER PRIMARY_KEY NOT NULL,
+	  cluster VARCHAR(255) NOT NULL,
+	  stop_time INTEGER NOT NULL,
+	  state VARCHAR(255) NOT NULL,
+	);`
+
+	_, err = db.Exec(pending_stop_jobs_schema)
+	if err != nil {
+		return fmt.Errorf("Unable to create table: %w", err)
+	}
+
+	return nil
+}
+
+func daemonQuit() {
 	trace.Debug("Closing Socket")
 
 	/* Deinit Database connection */
@@ -145,7 +232,7 @@ func DaemonQuit() {
 	os.Remove(Config.IpcSockPath)
 }
 
-func ConnectionReadAll(con net.Conn) (string, error) {
+func connectionReadAll(con net.Conn) (string, error) {
 	message := ""
 	block := make([]byte, 512)
 
