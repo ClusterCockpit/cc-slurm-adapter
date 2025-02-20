@@ -21,9 +21,13 @@ func main() {
 	var debugLevel int
 	flag.IntVar(&debugLevel, "debugLevel", 2, "Set log level")
 
+	var configPath string
+	flag.StringVar(&configPath, "configPath", "", "Specify configuration file path")
+
 	flag.Parse()
 
 	trace.SetLevel(debugLevel)
+	LoadConfig(configPath)
 
 	var err error
 	var mode string
