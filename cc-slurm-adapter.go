@@ -32,10 +32,10 @@ func main() {
 		err = fmt.Errorf("Prolog and Epilog must not be used at the same time")
 	} else if prolog {
 		mode = "Prolog"
-		err = PrologMain()
+		err = PrologEpilogMain()
 	} else if epilog {
 		mode = "Epilog"
-		err = EpilogMain()
+		err = PrologEpilogMain()
 	} else if daemon {
 		mode = "Daemon"
 		err = DaemonMain()
