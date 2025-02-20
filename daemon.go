@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"syscall"
 	"encoding/json"
-	"strconv"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
@@ -34,7 +33,7 @@ type StopJob struct {
 }
 
 var (
-	ipcSocket           net.Listener
+	ipcSocket          net.Listener
 	db                  *sql.DB
 
 	incompleteStartJobs []StartJob
@@ -51,58 +50,74 @@ func DaemonMain() error {
 	}
 	defer daemonQuit()
 
-	ctx, cancel := context.WithCancel(context.Background())
 
-	sigChan := make(chan os.Signal)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	/* Init Signal Handling */
+	signalChan := make(chan os.Signal)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	signalCtx, signalCancel := context.WithCancel(context.Background())
 
+	// start background routine that handles the Unix Socket
+	ipcSocketChan := make(chan []byte)
+	go ipcSocketListenRoutine(signalCtx, ipcSocketChan)
+
+	pollEventChan := make(chan struct{})
+	pollEventTimer := time.AfterFunc(time.Duration(Config.SlurmPollSeconds) * time.Second, func() { pollEventChan <- struct{}{}})
+
+	/* Signal Handler definition */
 	go func() {
-		<-sigChan
+		<-signalChan
 		trace.Debug("Received signal, shutting down...")
-		cancel()
+
+		pollEventTimer.Stop()
+
+		// cause Accept() on Unix socket to fail and unblock its routine.
+		signalCancel()
+		ipcSocket.Close()
 	}()
 
-outer_break:
 	for {
-		unixListener, _ := ipcSocket.(*net.UnixListener)
-		unixListener.SetDeadline(time.Now().Add(time.Duration(Config.SlurmPollSeconds) * time.Second))
-
-		trace.Debug("Waiting for connection over Unix Socket")
-		con, err := ipcSocket.Accept()
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				trace.Debug("TIMEOUT")
-				continue
+		select {
+		case <-signalCtx.Done():
+			trace.Info("Daemon terminating")
+			return nil
+		case msg := <-ipcSocketChan:
+			err = jobPrologEpilogNotify(msg)
+			if err != nil {
+				trace.Error("Unable to parse IPC message: %s", err)
 			}
+		case <-pollEventChan:
+			trace.Debug("Timer triggered Slurm polling")
+			pollEventTimer.Reset(time.Duration(Config.SlurmPollSeconds) * time.Second)
+		}
+	}
+}
 
+func ipcSocketListenRoutine(ctx context.Context, chn chan<- []byte) {
+	for {
+		conn, err := ipcSocket.Accept()
+		if err != nil {
 			select {
 			case <-ctx.Done():
-				trace.Debug("Cancelling Accept() via Signal")
-				break outer_break
+				trace.Debug("Cancelling Unix Socket Accept Loop")
+				return
 			default:
-				// Is it safe to continue here? Error may or may not be fatal here...
 				trace.Error("Error while accepting connection over Unix Socket: %s", err)
 				continue
 			}
 		}
 
-		defer con.Close()
-
-		trace.Debug("Receiving IPC message")
-		msg, err := connectionReadAll(con)
-		if err != nil {
-			trace.Error("Failed to receive IPC message over Unix Socket: %s", err)
-			continue
-		}
-
-		err = jobPrologEpilogNotify(msg)
-		if err != nil {
-			trace.Error("Unable to parse IPC message: %s", err)
-			continue
-		}
+		go func() {
+			/* Run the connection handling asynchronously. */
+			defer conn.Close()
+			trace.Debug("Receiving IPC message")
+			msg, err := connectionReadAll(conn)
+			if err != nil {
+				trace.Error("Failed to receive IPC message over Unix Socket: %s", err)
+				return
+			}
+			chn <- msg
+		}()
 	}
-
-	return nil
 }
 
 func daemonInit() error {
@@ -172,15 +187,6 @@ func jobPrologEpilogNotify(ipcMsg []byte) error {
 		return fmt.Errorf("Unable to parse IPC message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in the IPC procotocl.", err)
 	}
 
-	nnodes, err := strconv.Atoi(env.SLURM_JOB_NUM_NODES)
-	if err != nil {
-		return fmt.Errorf("Unable to convert SLURM_JOB_NUM_NODES to integer: %w", err)
-	}
-	ncpus_per_node, err := strconv.Atoi(env.SLURM_JOB_CPUS_PER_NODE)
-	if err != nil {
-		return fmt.Errorf("Unable to convert SLURM_JOB_CPUS_PER_NODE to integer: %w", err)
-	}
-
 	if env.SLURM_SCRIPT_CONTEXT == "prolog_slurmctld" {
 		return jobPrologNotify(env)
 	} else if env.SLURM_SCRIPT_CONTEXT == "epilog_slurmctld" {
@@ -188,31 +194,42 @@ func jobPrologEpilogNotify(ipcMsg []byte) error {
 	} else {
 		return fmt.Errorf("Invalid/unsupported SLURM_SCRIPT_CONTEXT: %s. Only prolog_slurmctld and epilog_slurmctld is supported")
 	}
-
-	newJob := BaseJob{
-		Cluster: env.SLURM_CLUSTER_NAME,
-		Partition: env.SLURM_JOB_PARTITION,
-		Project: env.SLURM_JOB_ACCOUNT,
-		User: env.SLURM_JOB_USER,
-		// State is not available in PrEp
-		// Resources is not available in PrEp
-		ArrayJobId: env.SLURM_ARRAY_JOB_ID,
-		// Walltime is not available in PrEp
-		JobID: env.SLURM_JOB_ID,
-		// Exclusive is not available in PrEp
-		StartTime: env.SLURM_JOB_START_TIME,
-		NumNodes: nnodes,
-		NumHWThreads: ncpus_per_node * nnodes,
-	}
-
-	return jobAddToIncomplete(newJob)
 }
 
 func jobPrologNotify(env PrologEpilogSlurmctldEnv) error {
+	trace.Debug("Handle Notify Prolog")
+//	nnodes, err := strconv.Atoi(env.SLURM_JOB_NUM_NODES)
+//	if err != nil {
+//		return fmt.Errorf("Unable to convert SLURM_JOB_NUM_NODES to integer: %w", err)
+//	}
+//	ncpus_per_node, err := strconv.Atoi(env.SLURM_JOB_CPUS_PER_NODE)
+//	if err != nil {
+//		return fmt.Errorf("Unable to convert SLURM_JOB_CPUS_PER_NODE to integer: %w", err)
+//	}
+//
+	//newJob := BaseJob{
+	//	Cluster: env.SLURM_CLUSTER_NAME,
+	//	Partition: env.SLURM_JOB_PARTITION,
+	//	Project: env.SLURM_JOB_ACCOUNT,
+	//	User: env.SLURM_JOB_USER,
+	//	// State is not available in PrEp
+	//	// Resources is not available in PrEp
+	//	ArrayJobId: env.SLURM_ARRAY_JOB_ID,
+	//	// Walltime is not available in PrEp
+	//	JobID: env.SLURM_JOB_ID,
+	//	// Exclusive is not available in PrEp
+	//	StartTime: env.SLURM_JOB_START_TIME,
+	//	NumNodes: nnodes,
+	//	NumHWThreads: ncpus_per_node * nnodes,
+	//}
+
+	//return jobAddToIncomplete(newJob)
+	return nil
 }
 
-func jobAddToIncomplete(job BaseJob) error {
-	// TODO
+func jobEpilogNotify(env PrologEpilogSlurmctldEnv) error {
+	trace.Debug("Handle Notify Epilog")
+	return nil
 }
 
 func createDbTables() error {
