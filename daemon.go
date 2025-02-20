@@ -174,7 +174,7 @@ func createDbTables() error {
 	}
 	
 	pending_start_jobs_schema := `
-	CREATE TABLE IF NOT EXISTS incomplete_jobs (
+	CREATE TABLE IF NOT EXISTS pending_start_jobs (
 	  cluster VARCHAR(255) NOT NULL,
 	  sub_cluster VARCHAR(255) NOT NULL,
 	  partition VARCHAR(255) NOT NULL,
@@ -204,7 +204,7 @@ func createDbTables() error {
 	  job_id INTEGER PRIMARY_KEY NOT NULL,
 	  cluster VARCHAR(255) NOT NULL,
 	  stop_time INTEGER NOT NULL,
-	  state VARCHAR(255) NOT NULL,
+	  state VARCHAR(255) NOT NULL
 	);`
 
 	_, err = db.Exec(pending_stop_jobs_schema)
@@ -216,15 +216,15 @@ func createDbTables() error {
 }
 
 func daemonQuit() {
-	trace.Debug("Closing Socket")
-
 	/* Deinit Database connection */
+	trace.Debug("Closing Database")
 	if db != nil {
 		db.Close()
 	}
 
 	/* While we can handle orphaned pid files and sockets,
 	 * we should clean them up after we're done. */
+	trace.Debug("Closing Socket")
 	if ipcSocket != nil {
 		ipcSocket.Close()
 	}
