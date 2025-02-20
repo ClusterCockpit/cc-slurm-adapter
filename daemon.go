@@ -67,7 +67,7 @@ outer_break:
 		unixListener, _ := ipcSocket.(*net.UnixListener)
 		unixListener.SetDeadline(time.Now().Add(time.Duration(Config.SlurmPollSeconds) * time.Second))
 
-		trace.Debug("socket.Accept()")
+		trace.Debug("Waiting for connection over Unix Socket")
 		con, err := ipcSocket.Accept()
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -80,19 +80,26 @@ outer_break:
 				trace.Debug("Cancelling Accept() via Signal")
 				break outer_break
 			default:
-				trace.Debugf("ERROR: %s", err)
+				// Is it safe to continue here? Error may or may not be fatal here...
+				trace.Error("Error while accepting connection over Unix Socket: %s", err)
 				continue
 			}
 		}
 
 		defer con.Close()
 
-		trace.Debug("Accept successful")
+		trace.Debug("Receiving IPC message")
 		msg, err := connectionReadAll(con)
 		if err != nil {
-			return fmt.Errorf("Failed to process message: %w", err)
+			trace.Error("Failed to receive IPC message over Unix Socket: %s", err)
+			continue
 		}
-		jobPrologEpilogNotify(msg)
+
+		err = jobPrologEpilogNotify(msg)
+		if err != nil {
+			trace.Error("Unable to parse IPC message: %s", err)
+			continue
+		}
 	}
 
 	return nil
@@ -128,7 +135,7 @@ func daemonInit() error {
 	}
 
 	/* Init Database connection */
-	trace.Debugf("Opening database: %s", Config.DbPath)
+	trace.Debug("Opening database: %s", Config.DbPath)
 	db, err = sql.Open("sqlite3", Config.DbPath)
 	if err != nil {
 		ipcSocket.Close()
@@ -138,7 +145,7 @@ func daemonInit() error {
 	}
 
 	/* Assert required tables exist in database. */
-	trace.Debugf("Assert required tables exist")
+	trace.Debug("Assert required tables exist")
 	err = createDbTables()
 	if err != nil {
 		db.Close()
@@ -148,7 +155,7 @@ func daemonInit() error {
 		return fmt.Errorf("Unable to create tables in database: %w", err)
 	}
 
-	trace.Debugf("Initialization complete")
+	trace.Debug("Initialization complete")
 	return nil
 }
 
@@ -157,9 +164,9 @@ func jobPrologEpilogNotify(ipcMsg []byte) error {
 	 * environment variables from here:
 	 * https://slurm.schedmd.com/prolog_epilog.html */
 	var env PrologEpilogSlurmctldEnv
-	err := json.Unmarshal(ipcMsg, env)
+	err := json.Unmarshal(ipcMsg, &env)
 	if err != nil {
-		return fmt.Errorf("Unable to parse IPC message as JSON (%w). Either a 3rd party is writing yo our Unix socket or there is a bug in the IPC procotocl.", err)
+		return fmt.Errorf("Unable to parse IPC message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in the IPC procotocl.", err)
 	}
 
 	_ = env

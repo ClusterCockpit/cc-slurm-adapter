@@ -19,67 +19,39 @@ var (
 )
 
 // It's important this function is called at the exact call depth
-func format(fmtStr string, v ...any) string {
+func format(logLevelPrefix string, fmtStr string, v ...any) string {
 	_, fn, line, _ := runtime.Caller(2)
-	return fmt.Sprintf("[%s:%d] %s", fn, line, fmt.Sprintf(fmtStr, v...))
+	return fmt.Sprintf("%s [%s:%d] %s", logLevelPrefix, fn, line, fmt.Sprintf(fmtStr, v...))
 }
 
 func SetLevel(level int) {
 	debugLevel = level
 }
 
-func Fatal(msg string) {
-	log.Fatal(format("%s", msg))
+func Fatal(fmtStr string, v ...any) {
+	log.Fatal(format("FATAL", fmtStr, v...))
 }
 
-func Fatalf(fmtStr string, v ...any) {
-	log.Fatal(format(fmtStr, v...))
-}
-
-func Error(msg string) {
+func Error(fmtStr string, v ...any) {
 	if debugLevel >= ERROR {
-		log.Print(format("%s", msg))
+		log.Print(format("ERROR", fmtStr, v...))
 	}
 }
 
-func Errorf(fmtStr string, v ...any) {
-	if debugLevel >= ERROR {
-		log.Print(format(fmtStr, v...))
-	}
-}
-
-func Warn(msg string) {
+func Warn(fmtStr string, v ...any) {
 	if debugLevel >= WARN {
-		log.Print(format("%s", msg))
+		log.Print(format("WARN", fmtStr, v...))
 	}
 }
 
-func Warnf(fmtStr string, v ...any) {
-	if debugLevel >= WARN {
-		log.Print(format(fmtStr, v...))
-	}
-}
-
-func Info(msg string) {
+func Info(fmtStr string, v ...any) {
 	if debugLevel >= INFO {
-		log.Print(format("%s", msg))
+		log.Print(format("INFO", fmtStr, v...))
 	}
 }
 
-func Infof(fmtStr string, v ...any) {
-	if debugLevel >= INFO {
-		log.Print(format(fmtStr, v...))
-	}
-}
-
-func Debug(msg string) {
+func Debug(fmtStr string, v ...any) {
 	if debugLevel >= DEBUG {
-		log.Print(format("%s", msg))
-	}
-}
-
-func Debugf(fmtStr string, v ...any) {
-	if debugLevel >= DEBUG {
-		log.Print(format(fmtStr, v...))
+		log.Print(format("DEBUG", fmtStr, v...))
 	}
 }

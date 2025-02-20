@@ -49,9 +49,9 @@ func main() {
 	}
 
 	if err != nil {
-		trace.Errorf("Main function encountered an error: %v", err)
+		trace.Error("Main function encountered an error: %v", err)
 		os.Exit(1)
 	}
 
-	trace.Infof("cc-slurm-adapter (%s) terminated sucessfully", mode)
+	trace.Info("cc-slurm-adapter (%s) terminated sucessfully", mode)
 }

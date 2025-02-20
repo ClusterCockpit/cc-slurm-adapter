@@ -89,11 +89,13 @@ func CollectEnvironmentValues() (PrologEpilogSlurmctldEnv, error) {
 func PrologEpilogMain() error {
 	trace.Info("Starting Prolog")
 
+	trace.Debug("Connecting to Unix Socket")
 	con, err := net.Dial("unix", Config.IpcSockPath)
 	if err != nil {
 		return fmt.Errorf("Unable to connect to the daemon's unix socket. Is the daemon running?: %w", err)
 	}
 
+	trace.Debug("Collecting Environment")
 	env, err := CollectEnvironmentValues()
 	if err != nil {
 		return fmt.Errorf("Unable to collect environment: %w", err)
@@ -104,6 +106,7 @@ func PrologEpilogMain() error {
 		return fmt.Errorf("Failed to marshal environment to JSON: %w", err)
 	}
 
+	trace.Debug("Sending data to daemon")
 	con.Write([]byte(j))
 	con.Close()
 

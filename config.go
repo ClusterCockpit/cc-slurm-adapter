@@ -42,11 +42,11 @@ func LoadConfig(configPath string) {
 
 	fileContents, err := os.ReadFile(configPath)
 	if err != nil {
-		trace.Warnf("Unable to read config file, using default values: %s", err)
+		trace.Warn("Unable to read config file, using default values: %s", err)
 	} else {
 		err = json.Unmarshal(fileContents, newConf)
 		if err != nil {
-			trace.Fatalf("Unable to parse Config JSON: %s", err)
+			trace.Fatal("Unable to parse Config JSON: %s", err)
 		}
 	}
 
