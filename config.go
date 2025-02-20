@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"fmt"
 	"encoding/json"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
@@ -28,7 +27,7 @@ type ProgramConfig struct {
 	SlurmPollSeconds int `json:"slurmPollSeconds"`
 }
 
-func LoadConfig(configPath string) error {
+func LoadConfig(configPath string) {
 	if configPath == "" {
 		configPath = DEFAULT_CONFIG_PATH
 	}
@@ -44,13 +43,12 @@ func LoadConfig(configPath string) error {
 	fileContents, err := os.ReadFile(configPath)
 	if err != nil {
 		trace.Warnf("Unable to read config file, using default values: %s", err)
-	}
-
-	err = json.Unmarshal(fileContents, newConf)
-	if err != nil {
-		return fmt.Errorf("Unable to parse Config JSON: %w", err)
+	} else {
+		err = json.Unmarshal(fileContents, newConf)
+		if err != nil {
+			trace.Fatalf("Unable to parse Config JSON: %s", err)
+		}
 	}
 
 	Config = newConf
-	return nil
 }
