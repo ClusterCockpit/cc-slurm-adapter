@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 	"encoding/json"
+	"strconv"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
@@ -59,7 +60,6 @@ func DaemonMain() error {
 		<-sigChan
 		trace.Debug("Received signal, shutting down...")
 		cancel()
-		ipcSocket.Close()
 	}()
 
 outer_break:
@@ -162,15 +162,57 @@ func daemonInit() error {
 func jobPrologEpilogNotify(ipcMsg []byte) error {
 	/* The message received contains a JSON, which contains all relevant
 	 * environment variables from here:
-	 * https://slurm.schedmd.com/prolog_epilog.html */
+	 * https://slurm.schedmd.com/prolog_epilog.html.
+	 * Please keep in mind that some of the environment variables are only
+	 * available in TaskProlog/TaskEpilog. However, we only run in slurmctld
+	 * context, so only their appropriate values are available. */
 	var env PrologEpilogSlurmctldEnv
 	err := json.Unmarshal(ipcMsg, &env)
 	if err != nil {
 		return fmt.Errorf("Unable to parse IPC message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in the IPC procotocl.", err)
 	}
 
-	_ = env
-	return nil
+	nnodes, err := strconv.Atoi(env.SLURM_JOB_NUM_NODES)
+	if err != nil {
+		return fmt.Errorf("Unable to convert SLURM_JOB_NUM_NODES to integer: %w", err)
+	}
+	ncpus_per_node, err := strconv.Atoi(env.SLURM_JOB_CPUS_PER_NODE)
+	if err != nil {
+		return fmt.Errorf("Unable to convert SLURM_JOB_CPUS_PER_NODE to integer: %w", err)
+	}
+
+	if env.SLURM_SCRIPT_CONTEXT == "prolog_slurmctld" {
+		return jobPrologNotify(env)
+	} else if env.SLURM_SCRIPT_CONTEXT == "epilog_slurmctld" {
+		return jobEpilogNotify(env)
+	} else {
+		return fmt.Errorf("Invalid/unsupported SLURM_SCRIPT_CONTEXT: %s. Only prolog_slurmctld and epilog_slurmctld is supported")
+	}
+
+	newJob := BaseJob{
+		Cluster: env.SLURM_CLUSTER_NAME,
+		Partition: env.SLURM_JOB_PARTITION,
+		Project: env.SLURM_JOB_ACCOUNT,
+		User: env.SLURM_JOB_USER,
+		// State is not available in PrEp
+		// Resources is not available in PrEp
+		ArrayJobId: env.SLURM_ARRAY_JOB_ID,
+		// Walltime is not available in PrEp
+		JobID: env.SLURM_JOB_ID,
+		// Exclusive is not available in PrEp
+		StartTime: env.SLURM_JOB_START_TIME,
+		NumNodes: nnodes,
+		NumHWThreads: ncpus_per_node * nnodes,
+	}
+
+	return jobAddToIncomplete(newJob)
+}
+
+func jobPrologNotify(env PrologEpilogSlurmctldEnv) error {
+}
+
+func jobAddToIncomplete(job BaseJob) error {
+	// TODO
 }
 
 func createDbTables() error {
