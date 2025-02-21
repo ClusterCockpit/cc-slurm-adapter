@@ -36,9 +36,7 @@ var (
 	ipcSocket          net.Listener
 	db                  *sql.DB
 
-	incompleteStartJobs []StartJob
-	pendingStartJobs    []StartJob
-	pendingStopJobs     []StopJob
+	incompleteStartJobs []uint32
 )
 
 func DaemonMain() error {
@@ -233,37 +231,9 @@ func jobEpilogNotify(env PrologEpilogSlurmctldEnv) error {
 }
 
 func createDbTables() error {
-	/* Three main tables exist currently:
-	 * - incomplete_start_jobs (jobs requiring more info from Slurm)
+	/* Two main tables exist currently:
 	 * - pending_start_jobs (jobs which haven't been submitted to cc-backend REST yet)
 	 * - pending_stop_jobs (jobs which haven't been submitted to cc-backend REST yet) */
-
-	incomplete_start_jobs_schema := `
-	CREATE TABLE IF NOT EXISTS incomplete_start_jobs (
-	  cluster VARCHAR(255) NOT NULL,
-	  sub_cluster VARCHAR(255) NOT NULL,
-	  partition VARCHAR(255) NOT NULL,
-	  project VARCHAR(255) NOT NULL,
-	  user VARCHAR(255) NOT NULL,
-	  state VARCHAR(255) NOT NULL,
-	  array_job_id INTEGER NOT NULL,
-	  job_id INTEGER PRIMARY_KEY NOT NULL,
-	  num_nodes INTEGER NOT NULL,
-	  num_hwthreads INTEGER NOT NULL,
-	  resources TEXT NOT NULL,
-	  exclusive INTEGER NOT NULL,
-	  start_time INTEGER NOT NULL,
-	  walltime INTEGER NOT NULL,
-	  job_script VARCHAR(255) NOT NULL,
-	  job_name VARCHAR(255) NOT NULL,
-	  slurm_info TEXT NOT NULL
-	);`
-
-	_, err := db.Exec(incomplete_start_jobs_schema)
-	if err != nil {
-		return fmt.Errorf("Unable to create table: %w", err)
-	}
-	
 	pending_start_jobs_schema := `
 	CREATE TABLE IF NOT EXISTS pending_start_jobs (
 	  cluster VARCHAR(255) NOT NULL,
@@ -285,7 +255,7 @@ func createDbTables() error {
 	  slurm_info TEXT NOT NULL
 	);`
 
-	_, err = db.Exec(pending_start_jobs_schema)
+	_, err := db.Exec(pending_start_jobs_schema)
 	if err != nil {
 		return fmt.Errorf("Unable to create table: %w", err)
 	}
