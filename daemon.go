@@ -17,9 +17,6 @@ import (
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
-
-	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 type StartJob struct {
@@ -36,7 +33,6 @@ type StopJob struct {
 
 var (
 	ipcSocket   net.Listener
-	db          *sql.DB
 	httpClient  http.Client
 	jobEvents   []PrologEpilogSlurmctldEnv
 )
@@ -183,27 +179,6 @@ func daemonInit() error {
 		return fmt.Errorf("Unable to create socket (is there an existing socket with bad permissions?): %w", err)
 	}
 
-	/* Init Database connection */
-	trace.Debug("Opening database: %s", Config.DbPath)
-	db, err = sql.Open("sqlite3", Config.DbPath)
-	if err != nil {
-		ipcSocket.Close()
-		os.Remove(Config.IpcSockPath)
-		os.Remove(Config.PidFilePath)
-		return fmt.Errorf("Unable to open database: %w", err)
-	}
-
-	/* Assert required tables exist in database. */
-	trace.Debug("Assert required tables exist")
-	err = createDbTables()
-	if err != nil {
-		db.Close()
-		ipcSocket.Close()
-		os.Remove(Config.IpcSockPath)
-		os.Remove(Config.PidFilePath)
-		return fmt.Errorf("Unable to create tables in database: %w", err)
-	}
-
 	/* Init HTTP Client */
 	tr := &http.Transport{
 		MaxIdleConns:	10,
@@ -315,57 +290,7 @@ func processSlurmSqueuePoll() {
 	}
 }
 
-func createDbTables() error {
-	/* Two main tables exist currently:
-	 * - pending_start_jobs (jobs which haven't been submitted to cc-backend REST yet)
-	 * - pending_stop_jobs (jobs which haven't been submitted to cc-backend REST yet) */
-	pending_start_jobs_schema := `
-	CREATE TABLE IF NOT EXISTS pending_start_jobs (
-	  cluster VARCHAR(255) NOT NULL,
-	  sub_cluster VARCHAR(255) NOT NULL,
-	  partition VARCHAR(255) NOT NULL,
-	  project VARCHAR(255) NOT NULL,
-	  user VARCHAR(255) NOT NULL,
-	  state VARCHAR(255) NOT NULL,
-	  array_job_id INTEGER NOT NULL,
-	  job_id INTEGER PRIMARY_KEY NOT NULL,
-	  num_nodes INTEGER NOT NULL,
-	  num_hwthreads INTEGER NOT NULL,
-	  resources TEXT NOT NULL,
-	  exclusive INTEGER NOT NULL,
-	  start_time INTEGER NOT NULL,
-	  walltime INTEGER NOT NULL,
-	  job_script VARCHAR(255) NOT NULL,
-	  job_name VARCHAR(255) NOT NULL,
-	  slurm_info TEXT NOT NULL
-	);`
-
-	_, err := db.Exec(pending_start_jobs_schema)
-	if err != nil {
-		return fmt.Errorf("Unable to create table: %w", err)
-	}
-
-	pending_stop_jobs_schema := `
-	CREATE TABLE IF NOT EXISTS pending_stop_jobs (
-	  job_id INTEGER PRIMARY_KEY NOT NULL,
-	  cluster VARCHAR(255) NOT NULL,
-	  stop_time INTEGER NOT NULL,
-	  state VARCHAR(255) NOT NULL
-	);`
-
-	_, err = db.Exec(pending_stop_jobs_schema)
-	if err != nil {
-		return fmt.Errorf("Unable to create table: %w", err)
-	}
-
-	return nil
-}
-
 func daemonQuit() {
-	/* Deinit Database connection */
-	trace.Debug("Closing Database")
-	db.Close()
-
 	/* While we can handle orphaned pid files and sockets,
 	 * we should clean them up after we're done.
 	 * The PID check is also not 100% reliable, since we just
