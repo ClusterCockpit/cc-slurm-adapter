@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"bytes"
+	"errors"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
@@ -151,6 +152,10 @@ func ipcSocketListenRoutine(ctx context.Context, chn chan<- []byte) {
 }
 
 func daemonInit() error {
+	/* Assert last_run is writable. That way crash immediately instead after a long delay. */
+	lastRunSet(lastRunGet())
+
+	/* Init Unix Socket */
 	trace.Debug("Opening Socket")
 
 	/* First check, if another daemon instance is already running.
@@ -323,6 +328,9 @@ func connectionReadAll(con net.Conn) ([]byte, error) {
 
 func lastRunGet() time.Time {
 	statInfo, err := os.Stat(Config.LastRunPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return time.Unix(0, 0)
+	}
 	if err != nil {
 		trace.Fatal("Unable to determine time of last run: %s", err)
 	}
