@@ -36,7 +36,7 @@ type StopJob struct {
 
 var (
 	ipcSocket   net.Listener
-	db           *sql.DB
+	db          *sql.DB
 	httpClient  http.Client
 	jobEvents   []PrologEpilogSlurmctldEnv
 )

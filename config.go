@@ -25,16 +25,17 @@ var (
 )
 
 type ProgramConfig struct {
-	PidFilePath string    `json:"pidFilePath"`
-	IpcSockPath string    `json:"ipcSocketPath"`
-	DbPath string         `json:"dbPath"`
-	LastRunPath string    `json:"lastRunPath"`
-	SlurmPollInterval int `json:"slurmPollInterval"`
-	SlurmQueryDelay int   `json:"slurmQueryDelay"`
-	SlurmQueryMaxSpan int `json:"slurmQueryMaxSpan"`
-	SlurmMaxRetries int   `json:"slurmMaxRetries"`
-	CcRestUrl string      `json:"ccRestUrl"`
-	CcRestJwt string      `json:"ccRestJwt"`
+	PidFilePath string      `json:"pidFilePath"`
+	IpcSockPath string      `json:"ipcSocketPath"`
+	DbPath string           `json:"dbPath"`
+	LastRunPath string      `json:"lastRunPath"`
+	SlurmPollInterval int   `json:"slurmPollInterval"`
+	SlurmQueryDelay int     `json:"slurmQueryDelay"`
+	SlurmQueryMaxSpan int   `json:"slurmQueryMaxSpan"`
+	SlurmMaxRetries int     `json:"slurmMaxRetries"`
+	CcRestUrl string        `json:"ccRestUrl"`
+	CcRestJwt string        `json:"ccRestJwt"`
+	NvidiaPciAddrs []string `json:"nvidiaPciAddrs"`
 }
 
 func LoadConfig(configPath string) {
@@ -52,6 +53,7 @@ func LoadConfig(configPath string) {
 		SlurmQueryDelay: DEFAULT_SLURM_QUERY_DELAY,
 		SlurmQueryMaxSpan: DEFAULT_SLURM_QUERY_MAX_SPAN,
 		SlurmMaxRetries: DEFAULT_SLURM_MAX_RETRIES,
+		NvidiaPciAddrs: make([]string, 0),
 	}
 
 	fileContents, err := os.ReadFile(configPath)

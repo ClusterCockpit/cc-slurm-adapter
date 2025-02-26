@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"strconv"
+	"regexp"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
@@ -42,6 +43,7 @@ type ScontrolJobResourcesNodesAllocationSocket struct {
 type ScontrolJobResourcesNodesAllocation struct {
 	Hostname *string `json:"name"`
 	Sockets []ScontrolJobResourcesNodesAllocationSocket `json:"sockets"`
+	Index *int `json:"index"`
 }
 
 type ScontrolJobResourcesNodes struct {
@@ -59,6 +61,7 @@ type ScontrolJob struct {
 	JobId *uint32 `json:"job_id"`
 	JobResources *ScontrolJobResources `json:"job_resources"`
 	Comment *string `json:"comment"`
+	GresDetail []string `json:"gres_detail"`
 }
 
 type ScontrolResult struct {
@@ -292,8 +295,27 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 			}
 		}
 
-		/* Determine accelerators. Currently this is only possible via the comment field */
-		accelerators := strings.Split(*scJob.Comment, ",")
+		/* Determine accelerators. We prefer to get the information via Config + GresDetail.
+		 * Though, for legacy we also support parsing the comment field.
+		 * The latter one requires manual intervention by the Slurm Administrators. */
+		var accelerators []string
+		if *scJob.Comment != "" {
+			accelerators = strings.Split(*scJob.Comment, ",")
+		} else if *allocation.Index < len(scJob.GresDetail) {
+			nodeGres := scJob.GresDetail[*allocation.Index]
+			// e.g. "gpu:h100:4(IDX:0-3)" --> "gpu" "h100" "4" "0-3"
+			gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\(IDX:[0-9,-])$")
+			nodeGresParsed := gresParseRegex.FindStringSubmatch(nodeGres)
+			if len(nodeGresParsed) == 4 && nodeGresParsed[0] == "gpu" {
+				gpuIndices := rangeStringToInts(nodeGresParsed[3])
+				for _, v := range gpuIndices {
+					if v >= len(Config.NvidiaPciAddrs) {
+						trace.Fatal("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file", job.JobId)
+					}
+					accelerators = append(accelerators, Config.NvidiaPciAddrs[v])
+				}
+			}
+		}
 
 		/* Create final result */
 		r := schema.Resource{
@@ -328,6 +350,34 @@ func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
 		return
 	}
 	trace.Warn("Detected Slurm version %s.%s.%s. Last supported version is %d.%d. Please check if cc-slurm-adapter is working correctly. If so, bump the version number in the source to suppress this warning.")
+}
+
+func rangeStringToInts(rangeString string) []int {
+	// commaList: ["0-2", "5"]
+	result := make([]int, 0)
+	commaList := strings.Split(rangeString, ",")
+	for _, subRange := range commaList {
+		subRangeElements := strings.Split(subRange, "-")
+		if len(subRangeElements) != 2 {
+			return nil
+		}
+
+		first, err := strconv.Atoi(subRangeElements[0])
+		if err != nil {
+			return nil
+		}
+
+		last, err := strconv.Atoi(subRangeElements[1])
+		if err != nil {
+			return nil
+		}
+
+		for i := first; i <= last; i++ {
+			result = append(result, i)
+		}
+	}
+
+	return result
 }
 
 func callProcess(argv ...string) (string, error) {
