@@ -346,10 +346,10 @@ func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
 	if major < SLURM_MAX_VER_MAJ {
 		return
 	}
-	if major == SLURM_MAX_VER_MAJ && minor < SLURM_MAX_VER_MIN {
+	if major == SLURM_MAX_VER_MAJ && minor <= SLURM_MAX_VER_MIN {
 		return
 	}
-	trace.Warn("Detected Slurm version %s.%s.%s. Last supported version is %d.%d. Please check if cc-slurm-adapter is working correctly. If so, bump the version number in the source to suppress this warning.")
+	trace.Warn("Detected Slurm version %s.%s.%s. Last supported version is %d.%d.X. Please check if cc-slurm-adapter is working correctly. If so, bump the version number in the source to suppress this warning.", ver.Major, ver.Minor, ver.Micro, major, minor)
 }
 
 func rangeStringToInts(rangeString string) []int {
