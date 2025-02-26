@@ -8,11 +8,10 @@ import (
 )
 
 const (
-	DEFAULT_CONFIG_PATH string      = "/etc/cc-slurm-adapter.json"
+	DEFAULT_CONFIG_PATH string      = "/etc/cc-slurm-adapter/config.json"
 
 	DEFAULT_PID_FILE_PATH           = "/run/cc-slurm-adapter/daemon.pid"
 	DEFAULT_IPC_SOCK_PATH           = "/run/cc-slurm-adapter/daemon.sock"
-	DEFAULT_DB_PATH                 = "/var/lib/cc-slurm-adapter/jobs.db"
 	DEFAULT_LAST_RUN_PATH           = "/var/lib/cc-slurm-adapter/lastrun"
 	DEFAULT_SLURM_POLL_INTERVAL int = 60
 	DEFAULT_SLURM_QUERY_DELAY       = 1
@@ -27,7 +26,6 @@ var (
 type ProgramConfig struct {
 	PidFilePath string      `json:"pidFilePath"`
 	IpcSockPath string      `json:"ipcSocketPath"`
-	DbPath string           `json:"dbPath"`
 	LastRunPath string      `json:"lastRunPath"`
 	SlurmPollInterval int   `json:"slurmPollInterval"`
 	SlurmQueryDelay int     `json:"slurmQueryDelay"`
@@ -47,7 +45,6 @@ func LoadConfig(configPath string) {
 	newConf := ProgramConfig{
 		PidFilePath: DEFAULT_PID_FILE_PATH,
 		IpcSockPath: DEFAULT_IPC_SOCK_PATH,
-		DbPath: DEFAULT_DB_PATH,
 		LastRunPath: DEFAULT_LAST_RUN_PATH,
 		SlurmPollInterval: DEFAULT_SLURM_POLL_INTERVAL,
 		SlurmQueryDelay: DEFAULT_SLURM_QUERY_DELAY,
