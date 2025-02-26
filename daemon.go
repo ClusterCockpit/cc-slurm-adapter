@@ -447,20 +447,22 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 		return nil, err
 	}
 
-	var metaData map[string]string
+	metaData := make(map[string]string)
 	metaData["jobScript"] = *job.Script
 	metaData["jobName"] = *job.Name
 	metaData["slurmInfo"] = SlurmGetJobInfoText(job)
 
 	var exclusive int32
-	if string(*job.Exclusive) == "true" {
+	if job.Exclusive != nil && string(*job.Exclusive) == "true" {
 		exclusive = 1
-	} else if string(*job.Shared) == "user" {
-		exclusive = 0
-	} else if string(*job.Shared) == "node" {
-		exclusive = 1
-	} else if string(*job.Shared) == "" {
-		exclusive = 0
+	} else if job.Shared != nil {
+		if string(*job.Shared) == "user" {
+			exclusive = 0
+		} else if string(*job.Shared) == "node" {
+			exclusive = 1
+		} else if string(*job.Shared) == "" {
+			exclusive = 0
+		}
 	}
 
 	ccStartJob := StartJob{
