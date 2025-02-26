@@ -141,7 +141,7 @@ func (v *SlurmInt) UnmarshalJSON(data []byte) error {
 	 * regardless of the Slurm version used. */
 	result := struct{
 		Set *bool `json:"set"`
-		Infinite *bool `json:"finite"`
+		Infinite *bool `json:"infinite"`
 		Number *int64 `json:"number"`
 	}{}
 	err := json.Unmarshal(data, &result)
@@ -156,8 +156,7 @@ func (v *SlurmInt) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	var result2 int64
-	err = json.Unmarshal(data, &result)
+	result2, err := strconv.ParseInt(string(data), 10, 64)
 	if err == nil {
 		*v = SlurmInt{
 			Set: true,
@@ -167,7 +166,7 @@ func (v *SlurmInt) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	return fmt.Errorf("Unable to parse '%v' as Slurm legacy integer nor new integer")
+	return fmt.Errorf("Unable to parse '%s' as Slurm legacy integer nor new integer", string(data))
 }
 
 func (v *SlurmString) UnmarshalJSON(data []byte) error {
