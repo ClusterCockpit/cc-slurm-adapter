@@ -91,6 +91,11 @@ func CollectEnvironmentValues() (PrologEpilogSlurmctldEnv, error) {
 func PrologEpilogMain() error {
 	trace.Info("Starting Prolog")
 
+	if _, exists := os.LookupEnv("SLURM_JOB_ID"); !exists {
+		fmt.Fprintf(os.Stderr, "Unable to start cc-slurm-adapter. Are we running in a Slurm PrEp context? If you want to start the daemon, please use -daemon. Use -help to show more details")
+		return fmt.Errorf("Missing environment SLURM_JOB_ID")
+	}
+
 	trace.Debug("Connecting to Unix Socket")
 	con, err := net.Dial("unix", Config.IpcSockPath)
 	if err != nil {
