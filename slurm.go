@@ -188,7 +188,7 @@ func (v *SlurmString) UnmarshalJSON(data []byte) error {
 }
 
 func SlurmQueryJob(jobId uint32) (*SacctJob, error) {
-	stdout, err := callProcess("sacct", "-j", strconv.Itoa(jobId), "--json")
+	stdout, err := callProcess("sacct", "-j", fmt.Sprintf("%d", jobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacct -j %d: %w", jobId, err)
 	}
@@ -255,7 +255,7 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 	 * If this fetching fails, we cannot populate allocated resources. This is not
 	 * critical to the operation of cc-backend, but it means certains graphs won't be
 	 * available, since metrics won't be assignable to a job anymore. */
-	stdout, err := callProcess("scontrol", "show", "job", strconv.Itoa(*job.JobId), "--json")
+	stdout, err := callProcess("scontrol", "show", "job", fmt.Sprintf("%d", *job.JobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run scontrol show job %d: %w (%s)", *job.JobId, err, stdout)
 	}
@@ -329,7 +329,7 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 }
 
 func SlurmGetJobInfoText(job SacctJob) string {
-	stdout, err := callProcess("scontrol", "show", "job", strconv.Itoa(*job.JobId))
+	stdout, err := callProcess("scontrol", "show", "job", fmt.Sprintf("%d", *job.JobId))
 	if err != nil {
 		/* If query fails, this is most likely because the job has already ended some time ago.
 		 * There is nothing we can do about this, so continue with just a warning. */
