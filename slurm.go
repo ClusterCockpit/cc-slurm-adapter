@@ -270,12 +270,12 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 	if len(scResult.Jobs) == 0 {
 		/* If no jobs are returned, this is most likely because the job has already ended some time ago.
 		 * There is nothing we can do about this, so continue with just a warning. */
-		trace.Warn("Unable to get job resources, continuing without resources: %s", err)
+		trace.Warn("Unable to get resources for job %d, continuing without resources.", *job.JobId)
 		return make([]*schema.Resource, 0), nil
 	}
 
 	if len(scResult.Jobs) >= 1 {
-		return nil, fmt.Errorf("'scontrol show job %d' returned too many jobs (%d > 1)", len(scResult.Jobs))
+		return nil, fmt.Errorf("'scontrol show job %d' returned too many jobs (%d > 1)", *job.JobId, len(scResult.Jobs))
 	}
 
 	scJob := scResult.Jobs[0]
@@ -309,7 +309,7 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 				gpuIndices := rangeStringToInts(nodeGresParsed[3])
 				for _, v := range gpuIndices {
 					if v >= len(Config.NvidiaPciAddrs) {
-						trace.Fatal("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file", job.JobId)
+						trace.Fatal("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file", *job.JobId)
 					}
 					accelerators = append(accelerators, Config.NvidiaPciAddrs[v])
 				}
@@ -333,7 +333,7 @@ func SlurmGetJobInfoText(job SacctJob) string {
 	if err != nil {
 		/* If query fails, this is most likely because the job has already ended some time ago.
 		 * There is nothing we can do about this, so continue with just a warning. */
-		return fmt.Sprintf("Error while getting job information for JobID=%d", job.JobId)
+		return fmt.Sprintf("Error while getting job information for JobID=%d", *job.JobId)
 	}
 
 	return strings.TrimSpace(stdout)
