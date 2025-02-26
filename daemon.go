@@ -384,7 +384,7 @@ func ccSyncJob(job SacctJob) error {
 		/* If the POST is not successful or if the entry already exists (which is ok),
 		 * raise an error. */
 
-		return fmt.Errorf("Calling /jobs/start_job (cluster=%s jobid=%d) failed with HTTP %d: Body %s", job.Cluster, job.JobId, respStart.StatusCode, string(body))
+		return fmt.Errorf("Calling /jobs/start_job (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStart.StatusCode, string(body))
 	}
 
 	// TODO If the job already exists in cc-backend, make sure to update values if interested, which may have changed.
@@ -414,20 +414,22 @@ func ccSyncJob(job SacctJob) error {
 	}
 
 	if respStop.StatusCode != 200 && respStop.StatusCode != 422 {
-		return fmt.Errorf("Calling /jobs/stop_job (cluster=%s jobid=%d) failed with HTTP %d: Body %s", job.Cluster, job.JobId, respStop.StatusCode, string(body))
+		return fmt.Errorf("Calling /jobs/stop_job (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStop.StatusCode, string(body))
 	}
 
 	if respStop.StatusCode == 422 {
 		/* While it should usually not occur a 422 (i.e. job was already stopped),
 		 * this may still occur if something in the state was glitched. */
-		trace.Warn("Calling /jobs/stop_job (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", job.Cluster, job.JobId, string(body))
+		trace.Warn("Calling /jobs/stop_job (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", *job.Cluster, *job.JobId, string(body))
 	}
 
 	return nil
 }
 
 func ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s%s", Config.CcRestUrl, relApiUrl), bytes.NewBuffer(bodyJson))
+	trace.Debug("POST to function %s: %s", relApiUrl, string(bodyJson))
+
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api%s", Config.CcRestUrl, relApiUrl), bytes.NewBuffer(bodyJson))
 	if err != nil {
 		return nil, err
 	}
@@ -477,6 +479,10 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 			Walltime: job.Time.Limit.Number,
 			Resources: resources,
 			MetaData: metaData,
+			JobID: int64(*job.JobId),
+			User: *job.User,
+			SubCluster: "NOT IMPLEMENTED",
+			State: schema.JobState(*job.State.Current),
 		},
 		StartTime: job.Time.Start.Number,
 	}

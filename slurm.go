@@ -93,6 +93,7 @@ type SacctJob struct {
 	Shared *SlurmString `json:"shared"`
 	Exclusive *SlurmString `json:"exclusive"`
 	Script *string `json:"script"`
+	User *string `json:"user"`
 }
 
 type SacctJobRequired struct {
