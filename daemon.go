@@ -470,7 +470,7 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 			Cluster: *job.Cluster,
 			Partition: *job.Partition,
 			Project: *job.Account,
-			ArrayJobId: job.ArrayJobId.Number,
+			ArrayJobId: int64(*job.Array.JobId),
 			NumNodes: int32(job.AllocationNodes.Number),
 			NumHWThreads: int32(job.Required.CPUs.Number),
 			Exclusive: exclusive,

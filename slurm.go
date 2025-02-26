@@ -73,11 +73,16 @@ type SacctJobState struct {
 	Current *SlurmString `json:"current"`
 }
 
+type SacctJobArray struct {
+	/* Only (our) required fields are listed here. */
+	JobId *uint32 `json:"job_id"`
+}
+
 type SacctJob struct {
 	/* Only (our) required fields are listed here. */
 	Account *string `json:"account"`
 	AllocationNodes *SlurmInt `json:"allocation_nodes"`
-	ArrayJobId *SlurmInt `json:"array_job_id"`
+	Array *SacctJobArray `json:"array"`
 	Cluster *string `json:"cluster"`
 	JobId *uint32 `json:"job_id"`
 	Name *string `json:"name"`
