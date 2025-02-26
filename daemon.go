@@ -268,7 +268,7 @@ func processSlurmSacctPoll() {
 	for _, job := range jobs {
 		err = ccSyncJob(job)
 		if err != nil {
-			trace.Warn("Syncing job to ClusterCockpit failed. Trying later...")
+			trace.Warn("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 			return
 		}
 	}
@@ -289,7 +289,7 @@ func processSlurmSqueuePoll() {
 	for _, job := range jobs {
 		err = ccSyncJob(job)
 		if err != nil {
-			trace.Warn("Syncing job to ClusterCockpit failed. Trying later...")
+			trace.Warn("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 			return
 		}
 	}
