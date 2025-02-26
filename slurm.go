@@ -190,7 +190,7 @@ func (v *SlurmString) UnmarshalJSON(data []byte) error {
 func SlurmQueryJob(jobId uint32) (*SacctJob, error) {
 	stdout, err := callProcess("sacct", "-j", string(jobId), "--json")
 	if err != nil {
-		return nil, fmt.Errorf("Unable to run sacct: %w", err)
+		return nil, fmt.Errorf("Unable to run sacct -j %d: %w", jobId, err)
 	}
 
 	var result SacctResult
@@ -217,7 +217,7 @@ func SlurmQueryJobsTimeRange(begin time.Time, end time.Time) ([]SacctJob, error)
 	endtime := end.Format(time.DateTime) // e.g. '2025-02-24 15:00'
 	stdout, err := callProcess("sacct", "--starttime", starttime, "--endtime", endtime, "--json")
 	if err != nil {
-		return nil, fmt.Errorf("Unable to run sacct: %w", err)
+		return nil, fmt.Errorf("Unable to run sacct /w starttime/endtime: %w. (%s)", err, stdout)
 	}
 
 	var result SacctResult
@@ -233,7 +233,7 @@ func SlurmQueryJobsTimeRange(begin time.Time, end time.Time) ([]SacctJob, error)
 func SlurmQueryJobsActive() ([]SacctJob, error) {
 	stdout, err := callProcess("squeue", "--json")
 	if err != nil {
-		return nil, fmt.Errorf("Unable to run sacct: %w", err)
+		return nil, fmt.Errorf("Unable to run squeue: %w", err)
 	}
 
 	var result SacctResult
@@ -257,13 +257,13 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 	 * available, since metrics won't be assignable to a job anymore. */
 	stdout, err := callProcess("scontrol", "show", "job", string(*job.JobId), "--json")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to run scontrol show job %d: %w", job.JobId, err)
 	}
 
 	var scResult ScontrolResult
 	err = json.Unmarshal([]byte(stdout), &scResult)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to parse scontrol JSON: %w", err)
 	}
 
 	/* Create schema.Resources out of the ScontrolResult */
@@ -383,11 +383,13 @@ func callProcess(argv ...string) (string, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
 
 	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	if err != nil {
-		return "", err
+		return fmt.Sprintf("stdout: %s, stdout: %s", stdout.String(), stderr.String()), err
 	}
 
 	return stdout.String(), nil
