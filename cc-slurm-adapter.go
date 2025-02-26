@@ -18,11 +18,14 @@ func main() {
 	var daemon bool
 	flag.BoolVar(&daemon, "daemon", false, "Start cc-slurm-adapter daemon. Prolog and Epilog calls require a running daemon.")
 
+	var nvidiaDetect bool
+	flag.BoolVar(&nvidiaDetect, "nvidia-detect", false, "Detect Nvidia GPUs in this system for use in the accelerator config.")
+
 	var debugLevel int
-	flag.IntVar(&debugLevel, "debugLevel", 2, "Set log level")
+	flag.IntVar(&debugLevel, "debug", 2, "Set log level")
 
 	var configPath string
-	flag.StringVar(&configPath, "configPath", "", "Specify configuration file path")
+	flag.StringVar(&configPath, "config", "", "Specify configuration file path")
 
 	flag.Parse()
 
@@ -32,7 +35,10 @@ func main() {
 	var err error
 	var mode string
 
-	if prolog && epilog {
+	if nvidiaDetect {
+		mode = "Nvidia Detect"
+		err = NvidiaDetectMain()
+	} else if prolog && epilog {
 		err = fmt.Errorf("Prolog and Epilog must not be used at the same time")
 	} else if prolog {
 		mode = "Prolog"
