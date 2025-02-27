@@ -380,7 +380,8 @@ func ccSyncJob(job SacctJob) error {
 		return err
 	}
 
-	if respStart.StatusCode != 201 && respStart.StatusCode != 422 {
+	jobAlreadyExists := respStart.StatusCode == 422
+	if respStart.StatusCode != 201 && jobAlreadyExists {
 		/* If the POST is not successful or if the entry already exists (which is ok),
 		 * raise an error. */
 
@@ -481,7 +482,6 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 			MetaData: metaData,
 			JobID: int64(*job.JobId),
 			User: *job.User,
-			State: schema.JobState(*job.State.Current),
 		},
 		StartTime: job.Time.Start.Number,
 	}

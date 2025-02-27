@@ -94,6 +94,7 @@ type SacctJob struct {
 	Exclusive *SlurmString `json:"exclusive"`
 	Script *string `json:"script"`
 	User *string `json:"user"`
+	Nodes *string `json:"nodes"`
 }
 
 type SacctJobRequired struct {
@@ -275,9 +276,19 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 	/* Create schema.Resources out of the ScontrolResult */
 	if len(scResult.Jobs) == 0 {
 		/* If no jobs are returned, this is most likely because the job has already ended some time ago.
-		 * There is nothing we can do about this, so continue with just a warning. */
-		trace.Warn("Unable to get resources for job %d, continuing without resources.", *job.JobId)
-		return make([]*schema.Resource, 0), nil
+		 * There is nothing we can do about this, so try to obtain hostnames
+		 * and continue without hwthread information. */
+		trace.Warn("Unable to get resources for job %d, continuing without hwthread information.", *job.JobId)
+
+		nodes, err := SlurmGetNodes(job)
+		if err != nil {
+			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", err)
+		}
+		resources := make([]*schema.Resource, len(nodes))
+		for i, v := range nodes {
+			resources[i] = &schema.Resource{ Hostname: v }
+		}
+		return resources, nil
 	}
 
 	if len(scResult.Jobs) >= 1 {
@@ -332,6 +343,15 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 	}
 
 	return resources, nil
+}
+
+func SlurmGetNodes(job SacctJob) ([]string, error) {
+	stdout, err := callProcess("scontrol", "show", "hostnames", *job.Nodes)
+	if err != nil {
+		return nil, fmt.Errorf("scontrol show hostnames '%s' failed: %w (%s)", *job.Nodes, err, stdout)
+	}
+	stdout = strings.TrimSpace(stdout)
+	return strings.Split(stdout, "\n"), nil
 }
 
 func SlurmGetJobInfoText(job SacctJob) string {
