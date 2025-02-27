@@ -481,7 +481,6 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 			MetaData: metaData,
 			JobID: int64(*job.JobId),
 			User: *job.User,
-			SubCluster: "NOT IMPLEMENTED",
 			State: schema.JobState(*job.State.Current),
 		},
 		StartTime: job.Time.Start.Number,
