@@ -369,7 +369,7 @@ func ccSyncJob(job SacctJob) error {
 		return fmt.Errorf("Unable to convert StartJob to JSON: %w", err)
 	}
 
-	respStart, err := ccPost("/jobs/start_job", startJobDataJSON)
+	respStart, err := ccPost("/jobs/start_job/", startJobDataJSON)
 	if err != nil {
 		return err
 	}
@@ -384,7 +384,7 @@ func ccSyncJob(job SacctJob) error {
 		/* If the POST is not successful or if the entry already exists (which is ok),
 		 * raise an error. */
 
-		return fmt.Errorf("Calling /jobs/start_job (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStart.StatusCode, string(body))
+		return fmt.Errorf("Calling /jobs/start_job/ (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStart.StatusCode, string(body))
 	}
 
 	// TODO If the job already exists in cc-backend, make sure to update values if interested, which may have changed.
@@ -402,7 +402,7 @@ func ccSyncJob(job SacctJob) error {
 		return fmt.Errorf("Unable to convert StopJob to JSON: %w", err)
 	}
 
-	respStop, err := ccPost("/jobs/stop_job", stopJobDataJSON)
+	respStop, err := ccPost("/jobs/stop_job/", stopJobDataJSON)
 	if err != nil {
 		return err
 	}
@@ -414,13 +414,13 @@ func ccSyncJob(job SacctJob) error {
 	}
 
 	if respStop.StatusCode != 200 && respStop.StatusCode != 422 {
-		return fmt.Errorf("Calling /jobs/stop_job (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStop.StatusCode, string(body))
+		return fmt.Errorf("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStop.StatusCode, string(body))
 	}
 
 	if respStop.StatusCode == 422 {
 		/* While it should usually not occur a 422 (i.e. job was already stopped),
 		 * this may still occur if something in the state was glitched. */
-		trace.Warn("Calling /jobs/stop_job (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", *job.Cluster, *job.JobId, string(body))
+		trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", *job.Cluster, *job.JobId, string(body))
 	}
 
 	return nil
