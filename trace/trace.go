@@ -40,13 +40,13 @@ func Error(fmtStr string, v ...any) {
 
 func Warn(fmtStr string, v ...any) {
 	if debugLevel >= WARN {
-		log.Print(format("WARN", fmtStr, v...))
+		log.Print(format("WARN ", fmtStr, v...))
 	}
 }
 
 func Info(fmtStr string, v ...any) {
 	if debugLevel >= INFO {
-		log.Print(format("INFO", fmtStr, v...))
+		log.Print(format("INFO ", fmtStr, v...))
 	}
 }
 
