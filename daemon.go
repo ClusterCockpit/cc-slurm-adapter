@@ -157,6 +157,9 @@ func daemonInit() error {
 	/* Assert last_run is writable. That way crash immediately instead after a long delay. */
 	lastRunSet(lastRunGet())
 
+	/* Verify Slurm Permissions */
+	SlurmCheckPerms()
+
 	/* Init Unix Socket */
 	trace.Debug("Opening Socket")
 

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"strconv"
 	"regexp"
+	"os/user"
+	"slices"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
@@ -131,6 +133,16 @@ type SlurmMeta struct {
 type SacctResult struct {
 	/* Only (our) required fields are listed here. */
 	Jobs []SacctJob `json:"jobs"`
+	Meta SlurmMeta `json:"meta"`
+}
+
+type SacctmgrUser struct {
+	AdministratorLevel []string `json:"administrator_level"`
+	Name string `json:"name"`
+}
+
+type SacctmgrResult struct {
+	Users []SacctmgrUser `json:"users"`
 	Meta SlurmMeta `json:"meta"`
 }
 
@@ -375,6 +387,45 @@ func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
 		return
 	}
 	trace.Warn("Detected Slurm version %s.%s.%s. Last supported version is %d.%d.X. Please check if cc-slurm-adapter is working correctly. If so, bump the version number in the source to suppress this warning.", ver.Major, ver.Minor, ver.Micro, major, minor)
+}
+
+func SlurmCheckPerms() {
+	/* This function checks, whether we are a Slurm operator. Issue a warning
+	 * if we are not. */
+	userObj, err := user.Current()
+	if err != nil {
+		trace.Fatal("Unable to retrieve current user name: %s", err)
+	}
+	username := userObj.Username
+
+	errBase := "Unable to check whether we have appropriate Slurm permissions (%s). cc-slurm-adapter MAY NOT REPORY ANY JOBS!"
+
+	stdout, err := callProcess("sacctmgr", "show", "user", username, "--json")
+	if err != nil {
+		trace.Warn(errBase, fmt.Sprintf("sacctmgr: %s", err))
+		return
+	}
+
+	var result SacctmgrResult
+	err = json.Unmarshal([]byte(stdout), &result)
+	if err != nil {
+		trace.Warn(errBase, fmt.Sprintf("JSON: %s", err))
+		return
+	}
+
+	SlurmWarnVersion(result.Meta.Slurm.Version)
+
+	for _, curUser := range result.Users {
+		if curUser.Name != username {
+			continue
+		}
+		if !slices.Contains(curUser.AdministratorLevel, "Operator") {
+			trace.Debug("sacctmgr: Successfully detected Slurm Operator permissions!")
+			return
+		}
+	}
+
+	trace.Warn("sacctmgr reported that our user '%s' is not a Slurm operator. If Slurm uses relaxed permissions, this is not a problem. However, if not, NO JOBS WILL BE REPORTED! Run 'sacctmgr add user %s Account=root AdminLevel=operator'", username, username)
 }
 
 func rangeStringToInts(rangeString string) []int {
