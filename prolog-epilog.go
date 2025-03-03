@@ -75,7 +75,10 @@ func CollectEnvironmentValues() (PrologEpilogSlurmctldEnv, error) {
 
 	for i := 0; i < typeOfs.NumField(); i++ {
 		field := e.Field(i)
-		if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.String {
+		if field.Kind() != reflect.String {
+			continue
+		}
+		if !field.IsValid() || !field.CanSet() {
 			return retval, fmt.Errorf("Field(%d) '%s' must be of type string", i, typeOfs.Field(i).Name)
 		}
 		e.Field(i).SetString(os.Getenv(typeOfs.Field(i).Name))
@@ -113,8 +116,8 @@ func PrologEpilogMain() error {
 		return fmt.Errorf("Failed to marshal environment to JSON: %w", err)
 	}
 
-	trace.Debug("Sending data to daemon")
-	con.Write([]byte(j))
+	trace.Debug("Sending data to daemon: %s", string(j))
+	con.Write(j)
 	con.Close()
 
 	return nil
