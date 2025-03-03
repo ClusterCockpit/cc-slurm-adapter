@@ -105,7 +105,9 @@ func DaemonMain() error {
 			trace.Debug("Timer triggered Slurm polling")
 			processJobEvents()
 			processSlurmSacctPoll()
-			processSlurmSqueuePoll()
+			// TODO enable the following line, once we actually implemented
+			// Updating of jobs, after they've started
+			//processSlurmSqueuePoll()
 
 			if len(jobEvents) > 0 {
 				/* If there are still jobs in the event queue,
