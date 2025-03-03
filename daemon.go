@@ -220,7 +220,7 @@ func processJobNotify(ipcMsg []byte) error {
 	var env PrologEpilogSlurmctldEnv
 	err := json.Unmarshal(ipcMsg, &env)
 	if err != nil {
-		return fmt.Errorf("Unable to parse IPC message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in our IPC procotocl.", err)
+		return fmt.Errorf("Unable to parse IPC message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in our IPC protocol: '%s'", err, string(ipcMsg))
 	}
 
 	env.SacctAttempts = 0
