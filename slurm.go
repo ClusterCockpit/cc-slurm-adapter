@@ -291,7 +291,7 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 		return resources, nil
 	}
 
-	if len(scResult.Jobs) >= 1 {
+	if len(scResult.Jobs) > 1 {
 		return nil, fmt.Errorf("'scontrol show job %d' returned too many jobs (%d > 1)", *job.JobId, len(scResult.Jobs))
 	}
 
