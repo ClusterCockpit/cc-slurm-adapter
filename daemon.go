@@ -186,6 +186,14 @@ func daemonInit() error {
 		return fmt.Errorf("Unable to create socket (is there an existing socket with bad permissions?): %w", err)
 	}
 
+	err = os.Chmod(Config.IpcSockPath, 0666)
+	if err != nil {
+		ipcSocket.Close()
+		os.Remove(Config.IpcSockPath)
+		os.Remove(Config.PidFilePath)
+		return fmt.Errorf("Failed to set permissions via chmod on IPC Socket: %w", err)
+	}
+
 	/* Init HTTP Client */
 	tr := &http.Transport{
 		MaxIdleConns:	10,
