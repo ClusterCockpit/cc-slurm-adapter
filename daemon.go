@@ -413,8 +413,7 @@ func ccSyncJob(job SacctJob) error {
 		return err
 	}
 
-	jobAlreadyExists := respStart.StatusCode == 422
-	if respStart.StatusCode != 201 && jobAlreadyExists {
+	if respStart.StatusCode != 201 && respStart.StatusCode != 422 {
 		/* If the POST is not successful or if the entry already exists (which is ok),
 		 * raise an error. */
 
