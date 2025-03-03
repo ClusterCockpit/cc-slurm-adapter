@@ -230,6 +230,7 @@ func processJobNotify(ipcMsg []byte) error {
 }
 
 func processJobEvents() {
+	trace.Debug("processJobEvents()")
 	newJobEvents := make([]PrologEpilogSlurmctldEnv, 0)
 	for index, jobEvent := range jobEvents {
 		jobEventId, err := strconv.ParseUint(jobEvent.SLURM_JOB_ID, 10, 32)
@@ -261,6 +262,7 @@ func processJobEvents() {
 }
 
 func processSlurmSacctPoll() {
+	trace.Debug("processSlurmSacctPoll()")
 	lastRun := lastRunGet().Add(time.Duration(-1 * time.Second)) // -1 second for good measure to avoid overlap error
 	thisRun := time.Now()
 
@@ -303,6 +305,7 @@ func processSlurmSacctPoll() {
 }
 
 func processSlurmSqueuePoll() {
+	trace.Debug("processSlurmSqueuePoll()")
 	jobs, err := SlurmQueryJobsActive()
 	if err != nil {
 		trace.Warn("Unable to query Slurm via squeue (is Slurm available?): %s", err)
@@ -362,6 +365,7 @@ func lastRunGet() time.Time {
 }
 
 func lastRunSet(timeStamp time.Time) {
+	trace.Debug("lastRunSet")
 	f, err := os.OpenFile(Config.LastRunPath, os.O_CREATE | os.O_WRONLY, 0644)
 	if err != nil {
 		trace.Fatal("Unable to set time of last run: %s", err)
