@@ -291,6 +291,12 @@ func processSlurmSacctPoll() {
 	}
 
 	for _, job := range jobs {
+		startTime := time.Unix(job.Time.Start.Number, 0)
+		if startTime.Before(lastRun) && job.Time.End.Number <= 0 {
+			trace.Debug("Skipping job %d, with startTime (%s) before lastRun (%s), that hasn't ended yet", job.JobId, startTime, lastRun)
+			continue
+		}
+
 		err = ccSyncJob(job)
 		if err != nil {
 			trace.Warn("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
