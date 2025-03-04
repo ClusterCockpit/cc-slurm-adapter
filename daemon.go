@@ -560,6 +560,13 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 		State: schema.JobState(strings.ToLower(string(*job.State.Current))),
 		StopTime: job.Time.End.Number,
 	}
+
+	/* WORKAROUNDS due to cc-backend's lack of support for them.
+	 * Ideally this should be removed in the future. */
+	if ccStopJob.State == "node_fail" {
+		trace.Warn("Alterting status 'node_fail' to 'failure' for job %d. If this is finally supported in cc-backend, the code generating this message can be removed", job.JobId)
+		ccStopJob.State = "failure"
+	}
 	return ccStopJob
 }
 
