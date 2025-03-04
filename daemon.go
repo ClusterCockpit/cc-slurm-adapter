@@ -289,7 +289,7 @@ func processSlurmSacctPoll() {
 
 	jobs, err := SlurmQueryJobsTimeRange(lastRun, thisRun)
 	if err != nil {
-		trace.Warn("Unable to query Slurm for jobs (is Slurm available?): %s", err)
+		trace.Error("Unable to query Slurm for jobs (is Slurm available?): %s", err)
 		return
 	}
 
@@ -302,7 +302,7 @@ func processSlurmSacctPoll() {
 
 		err = ccSyncJob(job)
 		if err != nil {
-			trace.Warn("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
+			trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 			return
 		}
 	}
@@ -317,14 +317,14 @@ func processSlurmSqueuePoll() {
 	trace.Debug("processSlurmSqueuePoll()")
 	jobs, err := SlurmQueryJobsActive()
 	if err != nil {
-		trace.Warn("Unable to query Slurm via squeue (is Slurm available?): %s", err)
+		trace.Error("Unable to query Slurm via squeue (is Slurm available?): %s", err)
 		return
 	}
 
 	for _, job := range jobs {
 		err = ccSyncJob(job)
 		if err != nil {
-			trace.Warn("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
+			trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 			return
 		}
 	}
