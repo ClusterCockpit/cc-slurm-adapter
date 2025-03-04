@@ -360,7 +360,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		} else if *allocation.Index < len(scJob.GresDetail) {
 			nodeGres := scJob.GresDetail[*allocation.Index]
 			// e.g. "gpu:h100:4(IDX:0-3)" --> "gpu" "h100" "4" "0-3"
-			gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\(IDX:[0-9,-])$")
+			gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\(IDX:([0-9,\\-]+)\\)$")
 			nodeGresParsed := gresParseRegex.FindStringSubmatch(nodeGres)
 			if len(nodeGresParsed) == 4 && nodeGresParsed[0] == "gpu" {
 				gpuIndices := rangeStringToInts(nodeGresParsed[3])

@@ -533,13 +533,22 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 		StartTime: job.Time.Start.Number,
 	}
 
-	/* Use actually allocated number of CPUs, if available. */
-	for _, tres := range job.Tres.Allocated {
-		if *tres.Type == "cpu" {
-			ccStartJob.BaseJob.NumHWThreads = *tres.Count
-			break
+	/* Determine number of CPUs and accelerators. Use requested values
+	 * as base, and use allocated values, if available. */
+	setResources := func (tresList []SacctJobTres, ccStartJob *StartJob) {
+		for _, tres := range tresList {
+			if *tres.Type == "cpu" {
+				ccStartJob.BaseJob.NumHWThreads = *tres.Count
+			}
+
+			if *tres.Type == "gres" && *tres.Name == "gpu" {
+				ccStartJob.BaseJob.NumAcc = *tres.Count
+			}
 		}
 	}
+
+	setResources(job.Tres.Requested, &ccStartJob)
+	setResources(job.Tres.Allocated, &ccStartJob)
 
 	return &ccStartJob, nil
 }
