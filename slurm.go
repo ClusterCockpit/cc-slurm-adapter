@@ -358,6 +358,11 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 }
 
 func SlurmGetNodes(job SacctJob) ([]string, error) {
+	if strings.ToLower(*job.Nodes) == "none assigned" {
+		/* Jobs, which have been cancelled before being scheduled, won't have any
+		 * hostnames listed. Return an empty list in this case. */
+		return make([]string, 0), nil
+	}
 	stdout, err := callProcess("scontrol", "show", "hostnames", *job.Nodes)
 	if err != nil {
 		return nil, fmt.Errorf("scontrol show hostnames '%s' failed: %w (%s)", *job.Nodes, err, stdout)
