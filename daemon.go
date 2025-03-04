@@ -505,11 +505,13 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 		} else if scJob.Shared != nil {
 			if string(*scJob.Shared) == "user" {
 				exclusive = 0
-			} else if string(*scJob.Shared) == "node" {
+			} else if string(*scJob.Shared) == "none" {
 				exclusive = 1
 			} else if string(*scJob.Shared) == "" {
 				exclusive = 0
 			}
+		} else {
+			trace.Debug("No information available about exclusive/shared for job %d.", *job.JobId)
 		}
 	}
 
