@@ -316,6 +316,13 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		return resources, nil
 	}
 
+	if scJob.JobResources == nil {
+		/* If Resources is nil, then the job probably just hasn't started yet.
+		 * we can safely return an empty list, since this job will be discarded
+		 * later either way. */
+		return make([]*schema.Resource, 0), nil
+	}
+
 	scAllocation := scJob.JobResources.Nodes.Allocation
 	resources := make([]*schema.Resource, 0)
 	for _, allocation := range scAllocation {
