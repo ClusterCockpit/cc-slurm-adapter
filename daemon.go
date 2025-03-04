@@ -481,7 +481,12 @@ func ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
 }
 
 func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
-	resources, err := SlurmGetResources(job)
+	scJob, err := SlurmGetScontrolJob(job)
+	if err != nil {
+		return nil, err
+	}
+
+	resources, err := SlurmGetResources(job, scJob)
 	if err != nil {
 		/* This error should only occur for criticial errors.
 		 * Non critical errors won't enter this case. */
@@ -494,15 +499,17 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	metaData["slurmInfo"] = SlurmGetJobInfoText(job)
 
 	var exclusive int32
-	if job.Exclusive != nil && string(*job.Exclusive) == "true" {
-		exclusive = 1
-	} else if job.Shared != nil {
-		if string(*job.Shared) == "user" {
-			exclusive = 0
-		} else if string(*job.Shared) == "node" {
+	if scJob != nil {
+		if scJob.Exclusive != nil && string(*scJob.Exclusive) == "true" {
 			exclusive = 1
-		} else if string(*job.Shared) == "" {
-			exclusive = 0
+		} else if scJob.Shared != nil {
+			if string(*scJob.Shared) == "user" {
+				exclusive = 0
+			} else if string(*scJob.Shared) == "node" {
+				exclusive = 1
+			} else if string(*scJob.Shared) == "" {
+				exclusive = 0
+			}
 		}
 	}
 

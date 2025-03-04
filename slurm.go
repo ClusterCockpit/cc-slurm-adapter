@@ -64,6 +64,8 @@ type ScontrolJob struct {
 	JobResources *ScontrolJobResources `json:"job_resources"`
 	Comment *string `json:"comment"`
 	GresDetail []string `json:"gres_detail"`
+	Shared *SlurmString `json:"shared"`
+	Exclusive *SlurmString `json:"exclusive"`
 }
 
 type ScontrolResult struct {
@@ -92,8 +94,6 @@ type SacctJob struct {
 	Required *SacctJobRequired `json:"required"`
 	State *SacctJobState `json:"state"`
 	Time *SacctJobTime `json:"time"`
-	Shared *SlurmString `json:"shared"`
-	Exclusive *SlurmString `json:"exclusive"`
 	Script *string `json:"script"`
 	User *string `json:"user"`
 	Nodes *string `json:"nodes"`
@@ -265,15 +265,7 @@ func SlurmQueryJobsActive() ([]SacctJob, error) {
 	return result.Jobs, nil
 }
 
-func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
-	/* This function fetches additional information about a Slurm job via scontrol.
-	 * Unfortunately some of the information is not available via sacct, so we need
-	 * scontrol to get this information. Because this information is not stored
-	 * in the slurmdbd, we have to query this within a few minutes after a job has
-	 * terminated at last.
-	 * If this fetching fails, we cannot populate allocated resources. This is not
-	 * critical to the operation of cc-backend, but it means certains graphs won't be
-	 * available, since metrics won't be assignable to a job anymore. */
+func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
 	stdout, err := callProcess("scontrol", "show", "job", fmt.Sprintf("%d", *job.JobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run scontrol show job %d: %w (%s)", *job.JobId, err, stdout)
@@ -285,14 +277,35 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 		return nil, fmt.Errorf("Unable to parse scontrol JSON: %w", err)
 	}
 
-	/* Create schema.Resources out of the ScontrolResult */
+	if len(scResult.Jobs) > 1 {
+		return nil, fmt.Errorf("'scontrol show job %d' returned too many jobs (%d > 1)", *job.JobId, len(scResult.Jobs))
+	}
+
 	if len(scResult.Jobs) == 0 {
+		return nil, nil
+	}
+
+	return &scResult.Jobs[0], nil
+}
+
+func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, error) {
+	/* This function fetches additional information about a Slurm job via scontrol.
+	 * Unfortunately some of the information is not available via sacct, so we need
+	 * scontrol to get this information. Because this information is not stored
+	 * in the slurmdbd, we have to query this within a few minutes after a job has
+	 * terminated at last.
+	 * If this fetching fails, we cannot populate allocated resources. This is not
+	 * critical to the operation of cc-backend, but it means certains graphs won't be
+	 * available, since metrics won't be assignable to a job anymore. */
+
+	/* Create schema.Resources out of the ScontrolResult */
+	if scJob == nil {
 		/* If no jobs are returned, this is most likely because the job has already ended some time ago.
 		 * There is nothing we can do about this, so try to obtain hostnames
 		 * and continue without hwthread information. */
-		trace.Warn("Unable to get resources for job %d, continuing without hwthread information.", *job.JobId)
+		trace.Warn("Unable to get resources for job %d, continuing without hwthread information.", *saJob.JobId)
 
-		nodes, err := SlurmGetNodes(job)
+		nodes, err := SlurmGetNodes(saJob)
 		if err != nil {
 			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", err)
 		}
@@ -303,11 +316,6 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 		return resources, nil
 	}
 
-	if len(scResult.Jobs) > 1 {
-		return nil, fmt.Errorf("'scontrol show job %d' returned too many jobs (%d > 1)", *job.JobId, len(scResult.Jobs))
-	}
-
-	scJob := scResult.Jobs[0]
 	scAllocation := scJob.JobResources.Nodes.Allocation
 	resources := make([]*schema.Resource, 0)
 	for _, allocation := range scAllocation {
@@ -338,7 +346,7 @@ func SlurmGetResources(job SacctJob) ([]*schema.Resource, error) {
 				gpuIndices := rangeStringToInts(nodeGresParsed[3])
 				for _, v := range gpuIndices {
 					if v >= len(Config.NvidiaPciAddrs) {
-						trace.Fatal("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file", *job.JobId)
+						trace.Fatal("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file", *saJob.JobId)
 					}
 					accelerators = append(accelerators, Config.NvidiaPciAddrs[v])
 				}
