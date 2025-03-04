@@ -545,5 +545,10 @@ func checkIngoreJob(startJobData *StartJob) bool {
 		trace.Info("Ignoring job %d, which has no resources associated. This job was probably never scheduled.")
 		return true
 	}
+
+	if startJobData.StartTime == 0 {
+		trace.Info("Ignoring job %d, which has no start time set. This job probably hasn't startet yet.")
+		return true
+	}
 	return false
 }
