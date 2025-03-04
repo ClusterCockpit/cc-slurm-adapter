@@ -82,6 +82,18 @@ type SacctJobArray struct {
 	JobId *uint32 `json:"job_id"`
 }
 
+type SacctJobTres struct {
+	Type *string `json:"type"`
+	Name *string `json:"name"`
+	Id *int32 `json:"id"`
+	Count *int32 `json:"count"`
+}
+
+type SacctJobTresList struct {
+	Allocated []SacctJobTres `json:"allocated"`
+	Requested []SacctJobTres `json:"requested"`
+}
+
 type SacctJob struct {
 	/* Only (our) required fields are listed here. */
 	Account *string `json:"account"`
@@ -97,6 +109,7 @@ type SacctJob struct {
 	Script *string `json:"script"`
 	User *string `json:"user"`
 	Nodes *string `json:"nodes"`
+	Tres *SacctJobTresList `json:"tres"`
 }
 
 type SacctJobRequired struct {

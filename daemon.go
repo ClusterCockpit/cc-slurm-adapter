@@ -533,6 +533,14 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 		StartTime: job.Time.Start.Number,
 	}
 
+	/* Use actually allocated number of CPUs, if available. */
+	for _, tres := range job.Tres.Allocated {
+		if *tres.Type == "cpu" {
+			ccStartJob.BaseJob.NumHWThreads = *tres.Count
+			break
+		}
+	}
+
 	return &ccStartJob, nil
 }
 
