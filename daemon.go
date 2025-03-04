@@ -60,8 +60,8 @@ func DaemonMain() error {
 	queryDelay := time.Duration(Config.SlurmQueryDelay) * time.Second
 	pollEventInterval := time.Duration(Config.SlurmPollInterval) * time.Second
 	pollEventChan := make(chan struct{})
-	pollEventTimer := time.AfterFunc(pollEventInterval, func() { pollEventChan <- struct{}{}})
-	pollEventNext := time.Now().Add(pollEventInterval)
+	pollEventTimer := time.AfterFunc(queryDelay, func() { pollEventChan <- struct{}{}})
+	pollEventNext := time.Now().Add(queryDelay)
 
 	/* Signal Handler definition */
 	go func() {
