@@ -294,13 +294,7 @@ func processSlurmSacctPoll() {
 	}
 
 	for _, job := range jobs {
-		startTime := time.Unix(job.Time.Start.Number, 0)
-		if startTime.Before(lastRun) && job.Time.End.Number <= 0 {
-			trace.Debug("Skipping job %d, with startTime (%s) before lastRun (%s), that hasn't ended yet", *job.JobId, startTime, lastRun)
-			continue
-		}
-
-		err = ccSyncJob(job)
+		err = ccSyncJob(job, lastRun)
 		if err != nil {
 			trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 			return
@@ -321,8 +315,13 @@ func processSlurmSqueuePoll() {
 		return
 	}
 
+	lastRun := lastRunGet().Add(time.Duration(-1 * time.Second)) // -1 second for good measure to avoid overlap error
+
 	for _, job := range jobs {
-		err = ccSyncJob(job)
+		// TODO This case still doesn't function correctly.
+		// This will need ccSyncJob to have some kind of feedback mechanism with cc-backend
+		// to query non-completed jobs and retrieve their state.
+		err = ccSyncJob(job, lastRun)
 		if err != nil {
 			trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 			return
@@ -388,7 +387,7 @@ func lastRunSet(timeStamp time.Time) {
 	}
 }
 
-func ccSyncJob(job SacctJob) error {
+func ccSyncJob(job SacctJob, lastRun time.Time) error {
 	/* Assert the job exists in cc-backend. Ignore if the job already exists. */
 	if Config.CcRestUrl == "" {
 		trace.Info("Skipping submission to ClusterCockpit REST. Missing URL. This feature is optional, so we will continue running")
@@ -400,7 +399,7 @@ func ccSyncJob(job SacctJob) error {
 		return err
 	}
 
-	if checkIngoreJob(startJobData) {
+	if checkIngoreJob(job, startJobData, lastRun) {
 		return nil
 	}
 
@@ -538,16 +537,22 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 	return ccStopJob
 }
 
-func checkIngoreJob(startJobData *StartJob) bool {
+func checkIngoreJob(job SacctJob, startJobData *StartJob, lastRun time.Time) bool {
 	/* We may want to filter out certain jobs, that shall not be submitted to cc-backend.
 	 * Put more rules here if necessary. */
+	startTime := time.Unix(job.Time.Start.Number, 0)
+	if startTime.Before(lastRun) && job.Time.End.Number <= 0 {
+		trace.Debug("Not submitting job %d, with startTime (%s) before lastRun (%s), that hasn't ended yet. This job has likely already been submitted.", *job.JobId, startTime, lastRun)
+		return true
+	}
+
 	if len(startJobData.Resources) == 0 {
 		trace.Info("Ignoring job %d, which has no resources associated. This job was probably never scheduled.")
 		return true
 	}
 
 	if startJobData.StartTime == 0 {
-		trace.Info("Ignoring job %d, which has no start time set. This job probably hasn't startet yet.")
+		trace.Debug("Ignoring job %d, which has no start time set. This job probably hasn't startet yet.")
 		return true
 	}
 	return false
