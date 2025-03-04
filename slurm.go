@@ -234,7 +234,7 @@ func SlurmQueryJob(jobId uint32) (*SacctJob, error) {
 func SlurmQueryJobsTimeRange(begin time.Time, end time.Time) ([]SacctJob, error) {
 	starttime := begin.Format(time.DateTime) // e.g. '2025-02-24 15:00'
 	endtime := end.Format(time.DateTime) // e.g. '2025-02-24 15:00'
-	stdout, err := callProcess("sacct", "--starttime", starttime, "--endtime", endtime, "--json")
+	stdout, err := callProcess("sacct", "--allusers", "--starttime", starttime, "--endtime", endtime, "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacct /w starttime/endtime: %w. (%s)", err, stdout)
 	}
@@ -250,7 +250,7 @@ func SlurmQueryJobsTimeRange(begin time.Time, end time.Time) ([]SacctJob, error)
 }
 
 func SlurmQueryJobsActive() ([]SacctJob, error) {
-	stdout, err := callProcess("squeue", "--json")
+	stdout, err := callProcess("squeue", "--all", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run squeue: %w", err)
 	}
