@@ -1,5 +1,6 @@
 # binaries
 /cc-slurm-adapter
+/wrapper.sh
 
 # vim swap files
 *.swp
