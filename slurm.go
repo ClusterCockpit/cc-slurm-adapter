@@ -390,6 +390,8 @@ func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
 }
 
 func SlurmCheckPerms() {
+	trace.Debug("SlurmCheckPerms()")
+
 	/* This function checks, whether we are a Slurm operator. Issue a warning
 	 * if we are not. */
 	userObj, err := user.Current()
@@ -415,11 +417,14 @@ func SlurmCheckPerms() {
 
 	SlurmWarnVersion(result.Meta.Slurm.Version)
 
+	trace.Debug("Checking permissions for user: %s", username)
+	trace.Debug("Users returned: %s", stdout)
+
 	for _, curUser := range result.Users {
 		if curUser.Name != username {
 			continue
 		}
-		if !slices.Contains(curUser.AdministratorLevel, "Operator") {
+		if slices.Contains(curUser.AdministratorLevel, "Operator") {
 			trace.Debug("sacctmgr: Successfully detected Slurm Operator permissions!")
 			return
 		}
