@@ -400,6 +400,10 @@ func ccSyncJob(job SacctJob) error {
 		return err
 	}
 
+	if checkIngoreJob(startJobData) {
+		return nil
+	}
+
 	startJobDataJSON, err := json.Marshal(startJobData)
 	if err != nil {
 		return fmt.Errorf("Unable to convert StartJob to JSON: %w", err)
@@ -532,4 +536,14 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 		StopTime: job.Time.End.Number,
 	}
 	return ccStopJob
+}
+
+func checkIngoreJob(startJobData *StartJob) bool {
+	/* We may want to filter out certain jobs, that shall not be submitted to cc-backend.
+	 * Put more rules here if necessary. */
+	if len(startJobData.Resources) == 0 {
+		trace.Info("Ignoring job %d, which has no resources associated. This job was probably never scheduled.")
+		return true
+	}
+	return false
 }
