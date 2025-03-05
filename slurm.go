@@ -355,22 +355,25 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		 * Though, for legacy we also support parsing the comment field.
 		 * The latter one requires manual intervention by the Slurm Administrators. */
 		var accelerators []string
-		if *scJob.Comment != "" {
-			accelerators = strings.Split(*scJob.Comment, ",")
-		} else if *allocation.Index < len(scJob.GresDetail) {
+		if *allocation.Index < len(scJob.GresDetail) {
+			trace.Debug("Detecting GPU via gres")
 			nodeGres := scJob.GresDetail[*allocation.Index]
 			// e.g. "gpu:h100:4(IDX:0-3)" --> "gpu" "h100" "4" "0-3"
 			gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\(IDX:([0-9,\\-]+)\\)$")
 			nodeGresParsed := gresParseRegex.FindStringSubmatch(nodeGres)
-			if len(nodeGresParsed) == 4 && nodeGresParsed[0] == "gpu" {
-				gpuIndices := rangeStringToInts(nodeGresParsed[3])
+			if len(nodeGresParsed) == 5 && nodeGresParsed[1] == "gpu" {
+				gpuIndices := rangeStringToInts(nodeGresParsed[4])
 				for _, v := range gpuIndices {
 					if v >= len(Config.NvidiaPciAddrs) {
-						trace.Fatal("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file", *saJob.JobId)
+						trace.Fatal("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(nvidiaGpus)=%d)", *saJob.JobId, v, len(Config.NvidiaPciAddrs))
 					}
+					trace.Debug("Found GPU: %s", Config.NvidiaPciAddrs[v])
 					accelerators = append(accelerators, Config.NvidiaPciAddrs[v])
 				}
 			}
+		} else if *scJob.Comment != "" {
+			trace.Debug("Detecting GPU via comment")
+			accelerators = strings.Split(*scJob.Comment, ",")
 		}
 
 		/* Create final result */
@@ -472,18 +475,27 @@ func rangeStringToInts(rangeString string) []int {
 	commaList := strings.Split(rangeString, ",")
 	for _, subRange := range commaList {
 		subRangeElements := strings.Split(subRange, "-")
+		if len(subRangeElements) == 1 {
+			i, err := strconv.Atoi(subRangeElements[0])
+			if err != nil {
+				continue
+			}
+			result = append(result, i)
+			continue
+		}
+
 		if len(subRangeElements) != 2 {
-			return nil
+			continue
 		}
 
 		first, err := strconv.Atoi(subRangeElements[0])
 		if err != nil {
-			return nil
+			continue
 		}
 
 		last, err := strconv.Atoi(subRangeElements[1])
 		if err != nil {
-			return nil
+			continue
 		}
 
 		for i := first; i <= last; i++ {
