@@ -18,6 +18,7 @@ import (
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
+	"github.com/nats-io/nats.go"
 )
 
 type StartJob struct {
@@ -35,6 +36,7 @@ type StopJob struct {
 var (
 	ipcSocket   net.Listener
 	httpClient  http.Client
+	natsConn    *nats.Conn
 	jobEvents   []PrologEpilogSlurmctldEnv
 )
 
@@ -204,7 +206,36 @@ func daemonInit() error {
 	}
 	httpClient = http.Client{Transport: tr}
 
-	/* TODO Init NATS Client */
+	/* Init NATS Client */
+	options := make([]nats.Option, 0)
+	natsEnabled := false
+	if len(Config.NatsUser) > 0 {
+		options = append(options, nats.UserInfo(Config.NatsUser, Config.NatsPassword))
+		natsEnabled = true
+	}
+	if len(Config.NatsCredsFile) > 0 {
+		options = append(options, nats.UserCredentials(Config.NatsCredsFile))
+		natsEnabled = true
+	}
+	if len(Config.NatsNKeySeedFile) > 0 {
+		r, err := nats.NkeyOptionFromSeed(Config.NatsNKeySeedFile)
+		if err != nil {
+			return fmt.Errorf("Unable to open NKeySeedFile: %w" ,err)
+		}
+		options = append(options, r)
+		natsEnabled = true
+	}
+	if natsEnabled {
+		natsAddr := fmt.Sprintf("nats://%s:%d", Config.NatsServer, Config.NatsPort)
+		trace.Info("Connecting to NATS: %s", natsAddr)
+		natsConn, err = nats.Connect(natsAddr, options...)
+		if err != nil {
+			ipcSocket.Close()
+			os.Remove(Config.IpcSockPath)
+			os.Remove(Config.PidFilePath)
+			return fmt.Errorf("Unable to connect to NATS (server: %s): %w", natsAddr, err)
+		}
+	}
 
 	/* job events queue initialization */
 	jobEvents = make([]PrologEpilogSlurmctldEnv, 0)
@@ -330,6 +361,9 @@ func processSlurmSqueuePoll() {
 }
 
 func daemonQuit() {
+	trace.Debug("Closing NATS")
+	natsConn.Close()
+
 	/* While we can handle orphaned pid files and sockets,
 	 * we should clean them up after we're done.
 	 * The PID check is also not 100% reliable, since we just

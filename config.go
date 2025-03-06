@@ -17,6 +17,9 @@ const (
 	DEFAULT_SLURM_QUERY_DELAY       = 1
 	DEFAULT_SLURM_QUERY_MAX_SPAN    = 7 * 24 * 60 * 60
 	DEFAULT_SLURM_MAX_RETRIES       = 10
+
+	DEFAULT_NATS_SUBJECT string     = "jobs"
+	DEFAULT_NATS_PORT uint16        = 4222
 )
 
 var (
@@ -34,6 +37,13 @@ type ProgramConfig struct {
 	CcRestUrl string        `json:"ccRestUrl"`
 	CcRestJwt string        `json:"ccRestJwt"`
 	NvidiaPciAddrs []string `json:"nvidiaPciAddrs"`
+	NatsServer string       `json:"natsServer"`
+	NatsPort uint16         `json:"natsPort"`
+	NatsSubject string      `json:"natsSubject"`
+	NatsUser string         `json:"natsUser"`
+	NatsPassword string     `json:"natsPassword"`
+	NatsCredsFile string    `json:"natsCredsFile"`
+	NatsNKeySeedFile string `json:"natsNKeySeed"`
 }
 
 func LoadConfig(configPath string) {
@@ -51,6 +61,8 @@ func LoadConfig(configPath string) {
 		SlurmQueryMaxSpan: DEFAULT_SLURM_QUERY_MAX_SPAN,
 		SlurmMaxRetries: DEFAULT_SLURM_MAX_RETRIES,
 		NvidiaPciAddrs: make([]string, 0),
+		NatsPort: DEFAULT_NATS_PORT,
+		NatsSubject: DEFAULT_NATS_SUBJECT,
 	}
 
 	fileContents, err := os.ReadFile(configPath)
