@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"errors"
 
+	"github.com/ClusterCockpit/cc-lib/ccMessage"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
 	"github.com/nats-io/nats.go"
@@ -285,10 +286,24 @@ func processJobEvents() {
 				break
 			} else {
 				trace.Warn("Job (%s) exceeded max query retries of %d. Giving up on job.", jobEvent.SLURM_JOB_ID, Config.SlurmMaxRetries)
+				continue
 			}
+		}
+
+		var msg ccmessage.CCMessage
+		tags := map[string]string{ "jobId": strconv.FormatUint(uint64(*job.JobId), 10) }
+		if jobEvent.SLURM_SCRIPT_CONTEXT == "prolog_slurmctld" {
+			msg, err = ccmessage.NewEvent("job", tags, nil, "startJob", time.Unix(job.Time.Start.Number, 0))
 		} else {
-			// TODO write to NATS
-			_ = job
+			msg, err = ccmessage.NewEvent("job", tags, nil, "stopJob", time.Unix(job.Time.End.Number, 0))
+		}
+		if err != nil {
+			trace.Warn("ccmessage.NewEvent() failed for job %d failed: %s", *job.JobId, err)
+		} else {
+			err = natsConn.Publish(Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			if err != nil {
+				trace.Warn("Unable to publish message on NATS for job %d: %s", *job.JobId, err)
+			}
 		}
 	}
 
