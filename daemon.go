@@ -147,7 +147,7 @@ func ipcSocketListenRoutine(ctx context.Context, chn chan<- []byte) {
 			 * the socket to accept a new connection almost immediatley. */
 			defer conn.Close()
 			trace.Debug("Receiving IPC message")
-			msg, err := connectionReadAll(conn)
+			msg, err := io.ReadAll(conn)
 			if err != nil {
 				trace.Error("Failed to receive IPC message over Unix Socket: %s", err)
 				return
@@ -381,25 +381,6 @@ func daemonQuit() {
 	ipcSocket.Close()
 	os.Remove(Config.IpcSockPath)
 	os.Remove(Config.PidFilePath)
-}
-
-func connectionReadAll(con net.Conn) ([]byte, error) {
-	// TODO use ioutil: ReadAll instead
-	message := make([]byte, 0)
-	block := make([]byte, 512)
-
-	for {
-		bytes, err := con.Read(block)
-		if err != nil && err != io.EOF {
-			return message, fmt.Errorf("Failed to read bytes on Unix Socket: %w", err)
-		}
-		message = append(message, block[:bytes]...)
-		if err == io.EOF {
-			break
-		}
-	}
-
-	return message, nil
 }
 
 func lastRunGet() time.Time {
