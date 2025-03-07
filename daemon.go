@@ -335,7 +335,7 @@ func processJobNotify(ipcMsg []byte) error {
 	 * environment variables from here:
 	 * https://slurm.schedmd.com/prolog_epilog.html.
 	 * Please keep in mind that some of the environment variables are only
-	 * available in TaskProlog/Tahne State schickst du die Nachricht mehrfachskEpilog. However, we only run in slurmctld
+	 * available in TaskProlog/TaskEpilog. However, we only run in slurmctld
 	 * context, so only their appropriate values are available. */
 	var env PrologEpilogSlurmctldEnv
 	err := json.Unmarshal(ipcMsg, &env)
@@ -452,6 +452,8 @@ func processSlurmSqueuePoll() {
 		// TODO This case still doesn't function correctly.
 		// This will need ccSyncJob to have some kind of feedback mechanism with cc-backend
 		// to query non-completed jobs and retrieve their state.
+		// UPDATE: We now have a cache of cc-backend's job state. However, at the moment this is only
+		// the job ID. We could extend this to the full job, which would allow us to detect, if anything has changed.
 		err = ccSyncJob(job, lastRun)
 		if err != nil {
 			trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
