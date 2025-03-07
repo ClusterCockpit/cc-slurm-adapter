@@ -20,8 +20,6 @@ const (
 
 	DEFAULT_NATS_SUBJECT string     = "jobs"
 	DEFAULT_NATS_PORT uint16        = 4222
-
-	DEFAULT_CC_POLL_INTERVAL int    = 300
 )
 
 var (
@@ -38,7 +36,6 @@ type ProgramConfig struct {
 	SlurmMaxRetries int     `json:"slurmMaxRetries"`
 	CcRestUrl string        `json:"ccRestUrl"`
 	CcRestJwt string        `json:"ccRestJwt"`
-	CcPollInterval int      `json:"ccPollInterval"`
 	NvidiaPciAddrs []string `json:"nvidiaPciAddrs"`
 	NatsServer string       `json:"natsServer"`
 	NatsPort uint16         `json:"natsPort"`
@@ -46,7 +43,7 @@ type ProgramConfig struct {
 	NatsUser string         `json:"natsUser"`
 	NatsPassword string     `json:"natsPassword"`
 	NatsCredsFile string    `json:"natsCredsFile"`
-	NatsNKeySeedFile string `json:"natsNKeySeedFile"`
+	NatsNKeySeedFile string `json:"natsNKeySeed"`
 }
 
 func LoadConfig(configPath string) {
@@ -59,7 +56,6 @@ func LoadConfig(configPath string) {
 		PidFilePath: DEFAULT_PID_FILE_PATH,
 		IpcSockPath: DEFAULT_IPC_SOCK_PATH,
 		LastRunPath: DEFAULT_LAST_RUN_PATH,
-		CcPollInterval: DEFAULT_CC_POLL_INTERVAL,
 		SlurmPollInterval: DEFAULT_SLURM_POLL_INTERVAL,
 		SlurmQueryDelay: DEFAULT_SLURM_QUERY_DELAY,
 		SlurmQueryMaxSpan: DEFAULT_SLURM_QUERY_MAX_SPAN,
