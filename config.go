@@ -37,7 +37,7 @@ type ProgramConfig struct {
 	SlurmMaxRetries int     `json:"slurmMaxRetries"`
 	CcRestUrl string        `json:"ccRestUrl"`
 	CcRestJwt string        `json:"ccRestJwt"`
-	GpuPciAddrs map[string][]string `json:"GpuPciAddrs"`
+	GpuPciAddrs map[string][]string `json:"gpuPciAddrs"`
 	NatsServer string       `json:"natsServer"`
 	NatsPort uint16         `json:"natsPort"`
 	NatsSubject string      `json:"natsSubject"`
