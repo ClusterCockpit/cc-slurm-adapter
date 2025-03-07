@@ -39,6 +39,7 @@ var (
 	httpClient  http.Client
 	natsConn    *nats.Conn
 	jobEvents   []PrologEpilogSlurmctldEnv
+	hostname    string
 )
 
 func DaemonMain() error {
@@ -157,6 +158,12 @@ func ipcSocketListenRoutine(ctx context.Context, chn chan<- []byte) {
 }
 
 func daemonInit() error {
+	var err error
+	hostname, err = os.Hostname()
+	if err != nil {
+		return fmt.Errorf("Unable to obtain hostname: %w", err)
+	}
+
 	/* Assert last_run is writable. That way crash immediately instead after a long delay. */
 	lastRunSet(lastRunGet())
 
@@ -274,7 +281,7 @@ func processJobEvents() {
 			continue
 		}
 
-		job, err := SlurmQueryJob(uint32(jobEventId))
+		_, err = SlurmQueryJob(uint32(jobEventId))
 		if err != nil {
 			// We want to avoid job events getting delivered out of order.
 			// Accordingly, cancel the execution of the loop if there is an error.
@@ -287,22 +294,6 @@ func processJobEvents() {
 			} else {
 				trace.Warn("Job (%s) exceeded max query retries of %d. Giving up on job.", jobEvent.SLURM_JOB_ID, Config.SlurmMaxRetries)
 				continue
-			}
-		}
-
-		var msg ccmessage.CCMessage
-		tags := map[string]string{ "jobId": strconv.FormatUint(uint64(*job.JobId), 10) }
-		if jobEvent.SLURM_SCRIPT_CONTEXT == "prolog_slurmctld" {
-			msg, err = ccmessage.NewEvent("job", tags, nil, "startJob", time.Unix(job.Time.Start.Number, 0))
-		} else {
-			msg, err = ccmessage.NewEvent("job", tags, nil, "stopJob", time.Unix(job.Time.End.Number, 0))
-		}
-		if err != nil {
-			trace.Warn("ccmessage.NewEvent() failed for job %d failed: %s", *job.JobId, err)
-		} else {
-			err = natsConn.Publish(Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
-			if err != nil {
-				trace.Warn("Unable to publish message on NATS for job %d: %s", *job.JobId, err)
 			}
 		}
 	}
@@ -477,6 +468,25 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		return fmt.Errorf("Calling /jobs/start_job/ (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStart.StatusCode, string(body))
 	}
 
+	if respStart.StatusCode == 201 {
+		/* send start job to NATS */
+		tags := map[string]string{
+			"hostname": hostname,
+			"type": "node",
+			"type-id": "0",
+			"function": "start_job",
+		}
+		msg, err := ccmessage.NewEvent("job", tags, nil, string(startJobDataJSON), time.Unix(startJobData.StartTime, 0))
+		if err != nil {
+			trace.Warn("ccmessage.NewEvent() failed for job %d failed: %s", *job.JobId, err)
+		} else {
+			err = natsConn.Publish(Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			if err != nil {
+				trace.Warn("Unable to publish message on NATS for job %d: %s", *job.JobId, err)
+			}
+		}
+	}
+
 	// TODO If the job already exists in cc-backend, make sure to update values if interested, which may have changed.
 	// In the future, this could be used to implement updating of job time limits, etc.
 
@@ -487,7 +497,8 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		return nil
 	}
 
-	stopJobDataJSON, err := json.Marshal(slurmJobToCcStopJob(job))
+	stopJobData := slurmJobToCcStopJob(job)
+	stopJobDataJSON, err := json.Marshal(stopJobData)
 	if err != nil {
 		return fmt.Errorf("Unable to convert StopJob to JSON: %w", err)
 	}
@@ -511,6 +522,25 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		/* While it should usually not occur a 422 (i.e. job was already stopped),
 		 * this may still occur if something in the state was glitched. */
 		trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", *job.Cluster, *job.JobId, string(body))
+	}
+
+	if respStop.StatusCode == 200 {
+		// TODO send stop job to NATS
+		tags := map[string]string{
+			"hostname": hostname,
+			"type": "node",
+			"type-id": "0",
+			"function": "stop_job",
+		}
+		msg, err := ccmessage.NewEvent("job", tags, nil, string(stopJobDataJSON), time.Unix(stopJobData.StopTime, 0))
+		if err != nil {
+			trace.Warn("ccmessage.NewEvent() failed for job %d failed: %s", *job.JobId, err)
+		} else {
+			err = natsConn.Publish(Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			if err != nil {
+				trace.Warn("Unable to publish message on NATS for job %d: %s", *job.JobId, err)
+			}
+		}
 	}
 
 	return nil
