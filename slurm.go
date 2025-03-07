@@ -362,13 +362,27 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 			gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\(IDX:([0-9,\\-]+)\\)$")
 			nodeGresParsed := gresParseRegex.FindStringSubmatch(nodeGres)
 			if len(nodeGresParsed) == 5 && nodeGresParsed[1] == "gpu" {
+				/* Find which accelerator list we have to search, depending on hostname regex */
 				gpuIndices := rangeStringToInts(nodeGresParsed[4])
-				for _, v := range gpuIndices {
-					if v >= len(Config.NvidiaPciAddrs) {
-						trace.Fatal("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(nvidiaGpus)=%d)", *saJob.JobId, v, len(Config.NvidiaPciAddrs))
+
+				found := false
+				for hostRegex, pciAddrList := range Config.GpuPciAddrs {
+					/* We initially check the regex, so no need to check for errors again. */
+					match, _ := regexp.MatchString(hostRegex, *allocation.Hostname)
+					if match {
+						for _, v := range gpuIndices {
+							if v >= len(pciAddrList) {
+								trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *saJob.JobId, v, len(Config.GpuPciAddrs))
+								continue
+							}
+							trace.Debug("Found GPU: %s", pciAddrList[v])
+							accelerators = append(accelerators, pciAddrList[v])
+						}
+						found = true
 					}
-					trace.Debug("Found GPU: %s", Config.NvidiaPciAddrs[v])
-					accelerators = append(accelerators, Config.NvidiaPciAddrs[v])
+				}
+				if !found {
+					trace.Warn("Unable to find GPU list for hostname=%s from GRES for job %d", allocation.Hostname, *saJob.JobId)
 				}
 			}
 		} else if *scJob.Comment != "" {

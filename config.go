@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"encoding/json"
+	"regexp"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
@@ -36,7 +37,7 @@ type ProgramConfig struct {
 	SlurmMaxRetries int     `json:"slurmMaxRetries"`
 	CcRestUrl string        `json:"ccRestUrl"`
 	CcRestJwt string        `json:"ccRestJwt"`
-	NvidiaPciAddrs []string `json:"nvidiaPciAddrs"`
+	GpuPciAddrs map[string][]string `json:"GpuPciAddrs"`
 	NatsServer string       `json:"natsServer"`
 	NatsPort uint16         `json:"natsPort"`
 	NatsSubject string      `json:"natsSubject"`
@@ -60,7 +61,7 @@ func LoadConfig(configPath string) {
 		SlurmQueryDelay: DEFAULT_SLURM_QUERY_DELAY,
 		SlurmQueryMaxSpan: DEFAULT_SLURM_QUERY_MAX_SPAN,
 		SlurmMaxRetries: DEFAULT_SLURM_MAX_RETRIES,
-		NvidiaPciAddrs: make([]string, 0),
+		GpuPciAddrs: make(map[string][]string),
 		NatsPort: DEFAULT_NATS_PORT,
 		NatsSubject: DEFAULT_NATS_SUBJECT,
 	}
@@ -85,6 +86,13 @@ func LoadConfig(configPath string) {
 		// using 0 would yield active waiting, so avoid that
 		trace.Warn("config: slurmQueryDelay %d < 1: Setting to 1", newConf.SlurmQueryDelay)
 		newConf.SlurmQueryDelay = 1
+	}
+
+	for hostnameRegexp, _ := range newConf.GpuPciAddrs {
+		_, err = regexp.Compile(hostnameRegexp)
+		if err != nil {
+			trace.Fatal("Error in config file: Invalid regex '%s': %v", hostnameRegexp, err)
+		}
 	}
 
 	Config = newConf
