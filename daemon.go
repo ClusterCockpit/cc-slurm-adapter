@@ -450,7 +450,7 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 	}
 
 	if respStart.StatusCode == 201 {
-		/* send start job to NATS */
+		trace.Debug("Sending start_job to NATS for job %d", job.JobId)
 		tags := map[string]string{
 			"hostname": hostname,
 			"type": "node",
@@ -506,7 +506,7 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 	}
 
 	if respStop.StatusCode == 200 {
-		// TODO send stop job to NATS
+		trace.Debug("Sending stop_job to NATS for job %d", job.JobId)
 		tags := map[string]string{
 			"hostname": hostname,
 			"type": "node",
