@@ -375,14 +375,14 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 								trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *saJob.JobId, v, len(Config.GpuPciAddrs))
 								continue
 							}
-							trace.Debug("Found GPU: %s", pciAddrList[v])
+							trace.Debug("Found GPU %d for %s: %s", v, *allocation.Hostname, pciAddrList[v])
 							accelerators = append(accelerators, pciAddrList[v])
 						}
 						found = true
 					}
 				}
 				if !found {
-					trace.Warn("Unable to find GPU list for hostname=%s from GRES for job %d", allocation.Hostname, *saJob.JobId)
+					trace.Warn("Unable to find GPU list for hostname=%s from GRES for job %d", *allocation.Hostname, *saJob.JobId)
 				}
 			}
 		} else if *scJob.Comment != "" {
