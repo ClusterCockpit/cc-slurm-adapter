@@ -641,6 +641,8 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 func checkIngoreJob(job SacctJob, startJobData *StartJob, lastRun time.Time) bool {
 	/* We may want to filter out certain jobs, that shall not be submitted to cc-backend.
 	 * Put more rules here if necessary. */
+	trace.Debug("Checking whether job %d should be ignored", *job.JobId)
+
 	startTime := time.Unix(job.Time.Start.Number, 0)
 	if startTime.Before(lastRun) && job.Time.End.Number <= 0 {
 		trace.Debug("Not submitting job %d, with startTime (%s) before lastRun (%s), that hasn't ended yet. This job has likely already been submitted.", *job.JobId, startTime, lastRun)
@@ -661,6 +663,7 @@ func checkIngoreJob(job SacctJob, startJobData *StartJob, lastRun time.Time) boo
 	 * Accordingly, if at least one host of the job does not match the pattern, the job
 	 * is not discarded. */
 	if len(Config.IgnoreHosts) > 0 {
+		trace.Debug("Checking job %d against ignore hosts list.", *job.JobId)
 		atLeastOneHostAllowed := false
 		for _, r := range startJobData.Resources {
 			/* The validity of the regexp is checked on startup, so no need to check it here. */
