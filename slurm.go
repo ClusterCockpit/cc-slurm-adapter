@@ -279,7 +279,7 @@ func SlurmQueryJobsActive() ([]SacctJob, error) {
 }
 
 func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
-	stdout, err := callProcess("scontrol", "show", "job", fmt.Sprintf("%d", *job.JobId), "--json")
+	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run scontrol show job %d: %w (%s)", *job.JobId, err, stdout)
 	}
@@ -408,7 +408,7 @@ func SlurmGetNodes(job SacctJob) ([]string, error) {
 		 * hostnames listed. Return an empty list in this case. */
 		return make([]string, 0), nil
 	}
-	stdout, err := callProcess("scontrol", "show", "hostnames", *job.Nodes)
+	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "hostnames", *job.Nodes)
 	if err != nil {
 		return nil, fmt.Errorf("scontrol show hostnames '%s' failed: %w (%s)", *job.Nodes, err, stdout)
 	}
@@ -417,7 +417,7 @@ func SlurmGetNodes(job SacctJob) ([]string, error) {
 }
 
 func SlurmGetJobInfoText(job SacctJob) string {
-	stdout, err := callProcess("scontrol", "show", "job", fmt.Sprintf("%d", *job.JobId))
+	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId))
 	if err != nil {
 		/* If query fails, this is most likely because the job has already ended some time ago.
 		 * There is nothing we can do about this, so continue with just a warning. */
