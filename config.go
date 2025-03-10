@@ -38,6 +38,7 @@ type ProgramConfig struct {
 	CcRestUrl string        `json:"ccRestUrl"`
 	CcRestJwt string        `json:"ccRestJwt"`
 	GpuPciAddrs map[string][]string `json:"gpuPciAddrs"`
+	IgnoreHosts string      `json:"ignoreHosts"`
 	NatsServer string       `json:"natsServer"`
 	NatsPort uint16         `json:"natsPort"`
 	NatsSubject string      `json:"natsSubject"`
@@ -92,6 +93,13 @@ func LoadConfig(configPath string) {
 		_, err = regexp.Compile(hostnameRegexp)
 		if err != nil {
 			trace.Fatal("Error in config file: Invalid regex '%s': %v", hostnameRegexp, err)
+		}
+	}
+
+	if len(Config.IgnoreHosts) > 0 {
+		_, err = regexp.Compile(Config.IgnoreHosts)
+		if err != nil {
+			trace.Fatal("Error in config file: Invalid regex '%s': %v", Config.IgnoreHosts, err)
 		}
 	}
 

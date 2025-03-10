@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"bytes"
 	"errors"
+	"regexp"
 
 	"github.com/ClusterCockpit/cc-lib/ccMessage"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
@@ -647,13 +648,34 @@ func checkIngoreJob(job SacctJob, startJobData *StartJob, lastRun time.Time) boo
 	}
 
 	if len(startJobData.Resources) == 0 {
-		trace.Info("Ignoring job %d, which has no resources associated. This job was probably never scheduled.")
+		trace.Info("Ignoring job %d, which has no resources associated. This job was probably never scheduled.", *job.JobId)
 		return true
 	}
 
 	if startJobData.StartTime == 0 {
-		trace.Debug("Ignoring job %d, which has no start time set. This job probably hasn't startet yet.")
+		trace.Debug("Ignoring job %d, which has no start time set. This job probably hasn't startet yet.", *job.JobId)
 		return true
 	}
+
+	/* If all hosts used in this job don't match the ignore pattern, discard the job.
+	 * Accordingly, if at least one host of the job does not match the pattern, the job
+	 * is not discarded. */
+	if len(Config.IgnoreHosts) > 0 {
+		atLeastOneHostAllowed := false
+		for _, r := range startJobData.Resources {
+			/* The validity of the regexp is checked on startup, so no need to check it here. */
+			match, _ := regexp.MatchString(Config.IgnoreHosts, r.Hostname)
+			if !match {
+				atLeastOneHostAllowed = true
+				break
+			}
+		}
+
+		if !atLeastOneHostAllowed {
+			trace.Debug("Ignoring job %d, which matches the hostname ignore pattern.", *job.JobId)
+			return true
+		}
+	}
+
 	return false
 }
