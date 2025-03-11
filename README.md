@@ -72,7 +72,8 @@ Though, it is possible this may change in newer Slurm versions.
 
 ## Command Line Usage
 
----                     | ---
+Options/Argument | Description
+--- | ---
 `-config <path>`        | Specify the path to the config file
 `-daemon`               | Run the cc-slurm-adapter in daemon mode
 `-debug <log-level>`    | Set the log evel (default is 2)
