@@ -72,12 +72,12 @@ Though, it is possible this may change in newer Slurm versions.
 
 ## Command Line Usage
 
----                 | ---
-`-config <path>`    | Specify the path to the config file
-`-daemon`           | Run the cc-slurm-adapter in daemon mode
-`-debug <log-level> | Set the log evel (default is 2)
-`-help`             | Show help for all command line flags
-`-nvidia-detect`    | Show Nvidia GPUs installed in the current system with their correct IDs. This is entirely independent functionality besides the daemon or prolog/epilog mode.
+---                     | ---
+`-config <path>`        | Specify the path to the config file
+`-daemon`               | Run the cc-slurm-adapter in daemon mode
+`-debug <log-level>`    | Set the log evel (default is 2)
+`-help`                 | Show help for all command line flags
+`-nvidia-detect`        | Show Nvidia GPUs installed in the current system with their correct IDs. This is entirely independent functionality besides the daemon or prolog/epilog mode.
 
 If neither `-daemon` or `-nvidia-detect` is supplied, cc-slurm-adapter runs in Prolog/Epilog mode.
 This only works when running from a Slurm Prolog/Epilog context.
