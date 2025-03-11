@@ -70,6 +70,18 @@ Should the array have at least one value, the string is set to that particular v
 While there may be the case of multiple values in an array, we have not encountered this under normal circumstances.
 Though, it is possible this may change in newer Slurm versions.
 
+## Command Line Usage
+
+---                 | ---
+`-config <path>`    | Specify the path to the config file
+`-daemon`           | Run the cc-slurm-adapter in daemon mode
+`-debug <log-level> | Set the log evel (default is 2)
+`-help`             | Show help for all command line flags
+`-nvidia-detect`    | Show Nvidia GPUs installed in the current system with their correct IDs. This is entirely independent functionality besides the daemon or prolog/epilog mode.
+
+If neither `-daemon` or `-nvidia-detect` is supplied, cc-slurm-adapter runs in Prolog/Epilog mode.
+This only works when running from a Slurm Prolog/Epilog context.
+
 ## Configuration
 
 ### Example
@@ -125,7 +137,7 @@ Config Key | Optional | Description
 `slurmMaxRetries`   | yes | Maximum attempts Slurm should be queried upon a Prolog/Epilog event. If Slurm is reacting slow or isn't available at all, this limits the "fast" attempts to query Slurm about that job. Even if it should time out, a later occuring synchronize should still catch this job. Though, the latency from Slurm to cc-backend is increased.
 `ccRestUrl`         | no  | The URL to cc-backend's REST API. Must not contain a trailing slash.
 `ccRestJwt`         | no  | The JWT obtained from cc-backend, which allows access to the REST API.
-`gpuPciAddrs`       | yes | Dictionary of Regexes mapping to a list of PCI addresses. If some of your nodes have GPUs, use this to map the hostnames via regex to a list of GPUs those nodes have.
+`gpuPciAddrs`       | yes | Dictionary of Regexes mapping to a list of PCI addresses. If some of your nodes have GPUs, use this to map the hostnames via regex to a list of GPUs those nodes have. They have to be ordered like NVML shows them, which is the same as running cc-slurm-adapter in `-detect-nvidia` mode.
 `ignoreHosts`       | yes | Regex of hostnames to ignore. If all hosts that are associated to a job match this regex, the job is discarded and not reported to cc-backend.
 `natsServer`        | yes | Hostname of the NATS server. Leave blank or omit to disable NATS.
 `natsPort`          | yes | Port of the NATS server.
