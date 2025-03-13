@@ -78,7 +78,7 @@ Options/Argument | Description
 `-daemon`               | Run the cc-slurm-adapter in daemon mode
 `-debug <log-level>`    | Set the log evel (default is 2)
 `-help`                 | Show help for all command line flags
-`-nvidia-detect`        | Show Nvidia GPUs installed in the current system with their correct IDs. This is entirely independent functionality besides the daemon or prolog/epilog mode.
+`-nvidia-detect`        | Show Nvidia GPUs installed in the current system with their correct IDs. This is entirely independent functionality besides the daemon or prolog/epilog mode. Run this on one of your compute nodes to determine the PCI addresses used in the config JSON.
 
 If neither `-daemon` or `-nvidia-detect` is supplied, cc-slurm-adapter runs in Prolog/Epilog mode.
 This only works when running from a Slurm Prolog/Epilog context.
@@ -133,9 +133,9 @@ Config Key | Optional | Description
 `ipcSockPath`       | yes | Path to the IPC socket. This socket is needed for cc-slurm-adapter running in prolog/epilog to communicate to cc-slurm-adapter running in daemon mode.
 `lastRunPath`       | yes | Path to the file which contains the time stamp of cc-slurm-adapter's last successful sync to cc-backend. Time is stored as a file timestamp, not in the file itself.
 `slurmPollInterval` | yes | Interval (seconds) in which a sync to cc-backend occurs, assuming no prolog/epilog event occurs.
-`slurmQueryDelay`   | yes | Time (seconds) to wait between prolog/epilog event to actual synchronization. This is just for good measure to give Slurm some time to react.
+`slurmQueryDelay`   | yes | Time (seconds) to wait between prolog/epilog event to actual synchronization. This is just for good measure to give Slurm some time to react. There should usually be no need to change this.
 `slurmQueryMaxSpan` | yes | Maximum time (seconds) cc-slurm-adapter is allowed to synchronize jobs from the past. This is to avoid accidental flooding with millions of jobs from e.g. multiple years.
-`slurmMaxRetries`   | yes | Maximum attempts Slurm should be queried upon a Prolog/Epilog event. If Slurm is reacting slow or isn't available at all, this limits the "fast" attempts to query Slurm about that job. Even if it should time out, a later occuring synchronize should still catch this job. Though, the latency from Slurm to cc-backend is increased.
+`slurmMaxRetries`   | yes | Maximum attempts Slurm should be queried upon a Prolog/Epilog event. If Slurm is reacting slow or isn't available at all, this limits the "fast" attempts to query Slurm about that job. Even if it should time out, a later occuring synchronize should still catch this job. Though, the latency from Slurm to cc-backend is increased. There should usually be no need to change this.
 `ccRestUrl`         | no  | The URL to cc-backend's REST API. Must not contain a trailing slash.
 `ccRestJwt`         | no  | The JWT obtained from cc-backend, which allows access to the REST API.
 `gpuPciAddrs`       | yes | Dictionary of Regexes mapping to a list of PCI addresses. If some of your nodes have GPUs, use this to map the hostnames via regex to a list of GPUs those nodes have. They have to be ordered like NVML shows them, which is the same as running cc-slurm-adapter in `-detect-nvidia` mode.

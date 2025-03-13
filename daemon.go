@@ -217,14 +217,11 @@ func daemonInit() error {
 
 	/* Init NATS Client */
 	options := make([]nats.Option, 0)
-	natsEnabled := false
 	if len(Config.NatsUser) > 0 {
 		options = append(options, nats.UserInfo(Config.NatsUser, Config.NatsPassword))
-		natsEnabled = true
 	}
 	if len(Config.NatsCredsFile) > 0 {
 		options = append(options, nats.UserCredentials(Config.NatsCredsFile))
-		natsEnabled = true
 	}
 	if len(Config.NatsNKeySeedFile) > 0 {
 		r, err := nats.NkeyOptionFromSeed(Config.NatsNKeySeedFile)
@@ -232,9 +229,8 @@ func daemonInit() error {
 			return fmt.Errorf("Unable to open NKeySeedFile: %w" ,err)
 		}
 		options = append(options, r)
-		natsEnabled = true
 	}
-	if natsEnabled {
+	if len(Config.NatsServer) > 0 {
 		natsAddr := fmt.Sprintf("nats://%s:%d", Config.NatsServer, Config.NatsPort)
 		trace.Info("Connecting to NATS: %s", natsAddr)
 		natsConn, err = nats.Connect(natsAddr, options...)
