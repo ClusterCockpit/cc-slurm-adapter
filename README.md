@@ -26,13 +26,13 @@ However, the usage of slurmctld's prolog/epilog hook is optional and is only use
 
 ## Limitations
 
-Because slurmdbd does not appear to store all information about a job in the slurmdbd, submitted jobs to cc-backend can lack specific information.
-This includes all the information, which is not obtainable via a `sacct`.
+Because slurmdbd does not appear to store all information about a job, submitted jobs to cc-backend may lack specific information in certain cases.
+This includes all the information, that are not obtainable via a `sacct`.
 For example, cc-slurm-adapter obtains resource allocation information via `scontrol --cluster XYZ show job XYZ --json`.
 However, it appears that this resource information becomes unavailable after a few minutes once the job has stopped (regardless of success or failure).
 Should the resource allocation information be of importance, one must make sure the daemon is not stopped for too long.
 Most notably, should resource information be unavailable, cc-backend cannot associate the job with metrics anymore.
-The jobs can still listed in cc-backend, but showing CPU, GPU, and memory metrics won't work anymore.
+The jobs can still be listed in cc-backend, but showing CPU, GPU, and memory metrics won't work anymore.
 
 ## Slurm Version Compatibility
 
@@ -206,6 +206,17 @@ $ sacctmgr add user cc-slurm-adapter Account=root AdminLevel=operator
 ```
 
 If your Slurm instance is restricted and the permissions are not given, NO JOBS WILL BE REPORTED!
+
+#### Debugging the daemon
+
+Okay, so you have set up the daemon, but no jobs are running or it is crashing?
+In that case you should first check the log.
+cc-slurm-adapter doesn't have its own log file.
+Instead it prints all errors and warnings to stderr.
+
+If the log doesn't show anything useful, you can increase the default log-level from 2 to 5 via `-log-level 5`.
+While it may spam the console for many jobs, the debug messages may give insight to what exactly is going wrong.
+Though, cc-slurm-adapter attempts to print anything of significance to the default log level.
 
 ### slurmctld Prolog/Epilog Hook (optional)
 
