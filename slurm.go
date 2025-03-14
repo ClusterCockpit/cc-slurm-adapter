@@ -290,12 +290,17 @@ func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
 		return nil, fmt.Errorf("Unable to parse scontrol JSON: %w", err)
 	}
 
-	if len(scResult.Jobs) > 1 {
-		return nil, fmt.Errorf("'scontrol show job %d' returned too many jobs (%d > 1)", *job.JobId, len(scResult.Jobs))
-	}
-
 	if len(scResult.Jobs) == 0 {
 		return nil, nil
+	}
+
+	if len(scResult.Jobs) > 1 {
+		for _, scJob := range scResult.Jobs {
+			if *scJob.JobId == *job.JobId {
+				return &scJob, nil
+			}
+		}
+		return nil, fmt.Errorf("'scontrol show job %d' returned too many jobs (%d > 1). The one we were looking for was not part of it.", *job.JobId, len(scResult.Jobs))
 	}
 
 	return &scResult.Jobs[0], nil
