@@ -93,7 +93,7 @@ func DaemonMain() error {
 			trace.Debug("Daemon terminating")
 			return nil
 		case msg := <-ipcSocketChan:
-			trace.Debug("Process IPC message")
+			trace.Debug("Process IPC message (%d pending messages)", len(ipcSocketChan))
 			err = processJobNotify(msg)
 			if err != nil {
 				trace.Error("Unable to parse IPC message: %s", err)
