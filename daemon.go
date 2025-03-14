@@ -540,6 +540,8 @@ func ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
 }
 
 func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
+	/* TODO Maybe we should move this into slurm.go. We shouldn't really use slurm
+	 * datastructures outside of slurm.go. */
 	scJob, err := SlurmGetScontrolJob(job)
 	if err != nil {
 		return nil, err
@@ -553,7 +555,7 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	}
 
 	metaData := make(map[string]string)
-	metaData["jobScript"] = *job.Script
+	metaData["jobScript"] = SlurmGetJobScript(job)
 	metaData["jobName"] = *job.Name
 	metaData["slurmInfo"] = SlurmGetJobInfoText(job)
 

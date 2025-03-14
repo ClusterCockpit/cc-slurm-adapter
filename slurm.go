@@ -432,6 +432,16 @@ func SlurmGetJobInfoText(job SacctJob) string {
 	return strings.TrimSpace(stdout)
 }
 
+func SlurmGetJobScript(job SacctJob) string {
+	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "write", "batch_script", fmt.Sprintf("%d", *job.JobId), "-")
+	if err != nil {
+		/* If the job has ended some time ago, this will fail.
+		 * However, this is not a critical case, so just return an empty job script. */
+		return ""
+	}
+	return stdout
+}
+
 func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
 	major, _ := strconv.Atoi(ver.Major)
 	minor, _ := strconv.Atoi(ver.Minor)
