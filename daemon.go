@@ -583,7 +583,7 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 			NumNodes: int32(job.AllocationNodes.Number),
 			NumHWThreads: int32(job.Required.CPUs.Number),
 			Exclusive: exclusive,
-			Walltime: job.Time.Limit.Number,
+			Walltime: job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
 			Resources: resources,
 			MetaData: metaData,
 			JobID: int64(*job.JobId),
