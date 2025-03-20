@@ -1,11 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"reflect"
-	"encoding/json"
 	"slices"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"

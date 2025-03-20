@@ -1,25 +1,25 @@
 package main
 
 import (
-	"fmt"
-	"net"
-	"os"
-	"io"
-	"strings"
-	"time"
-	"context"
-	"os/signal"
-	"syscall"
-	"encoding/json"
-	"net/http"
-	"strconv"
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
 	"regexp"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 
+	"github.com/ClusterCockpit/cc-backend/pkg/schema"
 	"github.com/ClusterCockpit/cc-lib/ccMessage"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
-	"github.com/ClusterCockpit/cc-backend/pkg/schema"
 	"github.com/nats-io/nats.go"
 )
 
@@ -29,18 +29,18 @@ type StartJob struct {
 }
 
 type StopJob struct {
-	JobId 	  uint32           `json:"jobId"     db:"job_id"`
-	Cluster   string           `json:"cluster"   db:"cluster"`
-	State     schema.JobState  `json:"jobState"  db:"state"`
-	StopTime  int64            `json:"stopTime"  db:"stop_time"`
+	JobId    uint32          `json:"jobId"     db:"job_id"`
+	Cluster  string          `json:"cluster"   db:"cluster"`
+	State    schema.JobState `json:"jobState"  db:"state"`
+	StopTime int64           `json:"stopTime"  db:"stop_time"`
 }
 
 var (
-	ipcSocket   net.Listener
-	httpClient  http.Client
-	natsConn    *nats.Conn
-	jobEvents   []PrologEpilogSlurmctldEnv
-	hostname    string
+	ipcSocket  net.Listener
+	httpClient http.Client
+	natsConn   *nats.Conn
+	jobEvents  []PrologEpilogSlurmctldEnv
+	hostname   string
 )
 
 func DaemonMain() error {
@@ -51,7 +51,6 @@ func DaemonMain() error {
 		return fmt.Errorf("Unable to initialize Daemon: %w", err)
 	}
 	defer daemonQuit()
-
 
 	/* Init Signal Handling */
 	signalChan := make(chan os.Signal)
@@ -65,7 +64,7 @@ func DaemonMain() error {
 	queryDelay := time.Duration(Config.SlurmQueryDelay) * time.Second
 	pollEventInterval := time.Duration(Config.SlurmPollInterval) * time.Second
 	pollEventChan := make(chan struct{})
-	pollEventTimer := time.AfterFunc(queryDelay, func() { pollEventChan <- struct{}{}})
+	pollEventTimer := time.AfterFunc(queryDelay, func() { pollEventChan <- struct{}{} })
 	pollEventNext := time.Now().Add(queryDelay)
 
 	/* Signal Handler definition */
@@ -210,7 +209,7 @@ func daemonInit() error {
 
 	/* Init HTTP Client */
 	tr := &http.Transport{
-		MaxIdleConns:	10,
+		MaxIdleConns:    10,
 		IdleConnTimeout: 2 * time.Duration(Config.SlurmPollInterval) * time.Second,
 	}
 	httpClient = http.Client{Transport: tr}
@@ -226,7 +225,7 @@ func daemonInit() error {
 	if len(Config.NatsNKeySeedFile) > 0 {
 		r, err := nats.NkeyOptionFromSeed(Config.NatsNKeySeedFile)
 		if err != nil {
-			return fmt.Errorf("Unable to open NKeySeedFile: %w" ,err)
+			return fmt.Errorf("Unable to open NKeySeedFile: %w", err)
 		}
 		options = append(options, r)
 	}
@@ -318,7 +317,7 @@ func processSlurmSacctPoll() {
 		 * I am not entirely sure that this works reliably or if Go will correctly
 		 * handle those changes. */
 		trace.Warn("Time change detected: Moving last run %d seconds backwards")
-		lastRun = lastRun.Add(-time.Duration(endOffset - beginOffset) * time.Second)
+		lastRun = lastRun.Add(-time.Duration(endOffset-beginOffset) * time.Second)
 	}
 
 	jobs, err := SlurmQueryJobsTimeRange(lastRun, thisRun)
@@ -394,7 +393,7 @@ func lastRunGet() time.Time {
 
 func lastRunSet(timeStamp time.Time) {
 	trace.Debug("lastRunSet")
-	f, err := os.OpenFile(Config.LastRunPath, os.O_CREATE | os.O_WRONLY, 0644)
+	f, err := os.OpenFile(Config.LastRunPath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		trace.Fatal("Unable to set time of last run: %s", err)
 	}
@@ -450,8 +449,8 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		trace.Debug("Sending start_job to NATS for job %d", job.JobId)
 		tags := map[string]string{
 			"hostname": hostname,
-			"type": "node",
-			"type-id": "0",
+			"type":     "node",
+			"type-id":  "0",
 			"function": "start_job",
 		}
 		msg, err := ccmessage.NewEvent("job", tags, nil, string(startJobDataJSON), time.Unix(startJobData.StartTime, 0))
@@ -506,8 +505,8 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		trace.Debug("Sending stop_job to NATS for job %d", job.JobId)
 		tags := map[string]string{
 			"hostname": hostname,
-			"type": "node",
-			"type-id": "0",
+			"type":     "node",
+			"type-id":  "0",
 			"function": "stop_job",
 		}
 		msg, err := ccmessage.NewEvent("job", tags, nil, string(stopJobDataJSON), time.Unix(stopJobData.StopTime, 0))
@@ -578,25 +577,25 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 
 	ccStartJob := StartJob{
 		BaseJob: schema.BaseJob{
-			Cluster: *job.Cluster,
-			Partition: *job.Partition,
-			Project: *job.Account,
-			ArrayJobId: int64(*job.Array.JobId),
-			NumNodes: int32(job.AllocationNodes.Number),
+			Cluster:      *job.Cluster,
+			Partition:    *job.Partition,
+			Project:      *job.Account,
+			ArrayJobId:   int64(*job.Array.JobId),
+			NumNodes:     int32(job.AllocationNodes.Number),
 			NumHWThreads: int32(job.Required.CPUs.Number),
-			Exclusive: exclusive,
-			Walltime: job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
-			Resources: resources,
-			MetaData: metaData,
-			JobID: int64(*job.JobId),
-			User: *job.User,
+			Exclusive:    exclusive,
+			Walltime:     job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
+			Resources:    resources,
+			MetaData:     metaData,
+			JobID:        int64(*job.JobId),
+			User:         *job.User,
 		},
 		StartTime: job.Time.Start.Number,
 	}
 
 	/* Determine number of CPUs and accelerators. Use requested values
 	 * as base, and use allocated values, if available. */
-	setResources := func (tresList []SacctJobTres, ccStartJob *StartJob) {
+	setResources := func(tresList []SacctJobTres, ccStartJob *StartJob) {
 		for _, tres := range tresList {
 			if *tres.Type == "cpu" {
 				ccStartJob.BaseJob.NumHWThreads = *tres.Count
@@ -616,9 +615,9 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 
 func slurmJobToCcStopJob(job SacctJob) StopJob {
 	ccStopJob := StopJob{
-		JobId: *job.JobId,
-		Cluster: *job.Cluster,
-		State: schema.JobState(strings.ToLower(string(*job.State.Current))),
+		JobId:    *job.JobId,
+		Cluster:  *job.Cluster,
+		State:    schema.JobState(strings.ToLower(string(*job.State.Current))),
 		StopTime: job.Time.End.Number,
 	}
 

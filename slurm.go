@@ -1,19 +1,19 @@
 package main
 
 import (
-	"time"
 	"bytes"
-	"os/exec"
 	"encoding/json"
 	"fmt"
-	"strings"
-	"strconv"
-	"regexp"
+	"os/exec"
 	"os/user"
+	"regexp"
 	"slices"
+	"strconv"
+	"strings"
+	"time"
 
-	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/ClusterCockpit/cc-backend/pkg/schema"
+	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
 
 /* SlurmInt supports these two JSON layouts:
@@ -21,9 +21,9 @@ import (
  * - { "set": true, "infinite": false, "number": 42 }
  */
 type SlurmInt struct {
-	Set bool `json:"set"`
-	Infinite bool `json:"infinite"`
-	Number int64 `json:"number"`
+	Set      bool  `json:"set"`
+	Infinite bool  `json:"infinite"`
+	Number   int64 `json:"number"`
 }
 
 /* SlurmString supports these two JSON layouts:
@@ -33,19 +33,19 @@ type SlurmInt struct {
 type SlurmString string
 
 type ScontrolJobResourcesNodesAllocationSocketCore struct {
-	Index *int `json:"index"`
+	Index  *int         `json:"index"`
 	Status *SlurmString `json:"status"`
 }
 
 type ScontrolJobResourcesNodesAllocationSocket struct {
-	Index *int `json:"index"`
+	Index *int                                            `json:"index"`
 	Cores []ScontrolJobResourcesNodesAllocationSocketCore `json:"cores"`
 }
 
 type ScontrolJobResourcesNodesAllocation struct {
-	Hostname *string `json:"name"`
-	Sockets []ScontrolJobResourcesNodesAllocationSocket `json:"sockets"`
-	Index *int `json:"index"`
+	Hostname *string                                     `json:"name"`
+	Sockets  []ScontrolJobResourcesNodesAllocationSocket `json:"sockets"`
+	Index    *int                                        `json:"index"`
 }
 
 type ScontrolJobResourcesNodes struct {
@@ -53,24 +53,24 @@ type ScontrolJobResourcesNodes struct {
 }
 
 type ScontrolJobResources struct {
-	Nodes *ScontrolJobResourcesNodes `json:"nodes"`
-	CPUs *SlurmInt `json:"cpus"`
-	ThreadsPerCore *SlurmInt `json:"threads_per_core"`
+	Nodes          *ScontrolJobResourcesNodes `json:"nodes"`
+	CPUs           *SlurmInt                  `json:"cpus"`
+	ThreadsPerCore *SlurmInt                  `json:"threads_per_core"`
 }
 
 type ScontrolJob struct {
 	/* Only (our) required fields are listed here. */
-	JobId *uint32 `json:"job_id"`
+	JobId        *uint32               `json:"job_id"`
 	JobResources *ScontrolJobResources `json:"job_resources"`
-	Comment *string `json:"comment"`
-	GresDetail []string `json:"gres_detail"`
-	Shared *SlurmString `json:"shared"`
-	Exclusive *SlurmString `json:"exclusive"`
+	Comment      *string               `json:"comment"`
+	GresDetail   []string              `json:"gres_detail"`
+	Shared       *SlurmString          `json:"shared"`
+	Exclusive    *SlurmString          `json:"exclusive"`
 }
 
 type ScontrolResult struct {
 	Jobs []ScontrolJob `json:"jobs"`
-	Meta *SlurmMeta `json:"meta"`
+	Meta *SlurmMeta    `json:"meta"`
 }
 
 type SacctJobState struct {
@@ -83,10 +83,10 @@ type SacctJobArray struct {
 }
 
 type SacctJobTres struct {
-	Type *string `json:"type"`
-	Name *string `json:"name"`
-	Id *int32 `json:"id"`
-	Count *int32 `json:"count"`
+	Type  *string `json:"type"`
+	Name  *string `json:"name"`
+	Id    *int32  `json:"id"`
+	Count *int32  `json:"count"`
 }
 
 type SacctJobTresList struct {
@@ -96,36 +96,36 @@ type SacctJobTresList struct {
 
 type SacctJob struct {
 	/* Only (our) required fields are listed here. */
-	Account *string `json:"account"`
-	AllocationNodes *SlurmInt `json:"allocation_nodes"`
-	Array *SacctJobArray `json:"array"`
-	Cluster *string `json:"cluster"`
-	JobId *uint32 `json:"job_id"`
-	Name *string `json:"name"`
-	Partition *string `json:"partition"`
-	Required *SacctJobRequired `json:"required"`
-	State *SacctJobState `json:"state"`
-	Time *SacctJobTime `json:"time"`
-	Script *string `json:"script"`
-	User *string `json:"user"`
-	Nodes *string `json:"nodes"`
-	Tres *SacctJobTresList `json:"tres"`
+	Account         *string           `json:"account"`
+	AllocationNodes *SlurmInt         `json:"allocation_nodes"`
+	Array           *SacctJobArray    `json:"array"`
+	Cluster         *string           `json:"cluster"`
+	JobId           *uint32           `json:"job_id"`
+	Name            *string           `json:"name"`
+	Partition       *string           `json:"partition"`
+	Required        *SacctJobRequired `json:"required"`
+	State           *SacctJobState    `json:"state"`
+	Time            *SacctJobTime     `json:"time"`
+	Script          *string           `json:"script"`
+	User            *string           `json:"user"`
+	Nodes           *string           `json:"nodes"`
+	Tres            *SacctJobTresList `json:"tres"`
 }
 
 type SacctJobRequired struct {
-	CPUs *SlurmInt `json:"CPUs"`
-	MemoryPerCPU *SlurmInt `json:"memory_per_cpu"`
+	CPUs          *SlurmInt `json:"CPUs"`
+	MemoryPerCPU  *SlurmInt `json:"memory_per_cpu"`
 	MemoryPerNode *SlurmInt `json:"memory_per_node"`
 }
 
 type SacctJobTime struct {
 	/* Only (our) required fields are listed here. */
 	Elapsed SlurmInt `json:"elapsed"`
-	End SlurmInt `json:"end"`
-	Limit SlurmInt `json:"limit"`
-	Start SlurmInt `json:"start"`
+	End     SlurmInt `json:"end"`
+	Limit   SlurmInt `json:"limit"`
+	Start   SlurmInt `json:"start"`
 }
-	
+
 type SlurmMetaSlurmVersion struct {
 	Major string `json:"major"`
 	Minor string `json:"minor"`
@@ -134,8 +134,8 @@ type SlurmMetaSlurmVersion struct {
 
 type SlurmMetaSlurm struct {
 	Version SlurmMetaSlurmVersion `json:"version"`
-	Release string `json:"release"`
-	Cluster string `json:"cluster"`
+	Release string                `json:"release"`
+	Cluster string                `json:"cluster"`
 }
 
 type SlurmMeta struct {
@@ -146,23 +146,23 @@ type SlurmMeta struct {
 type SacctResult struct {
 	/* Only (our) required fields are listed here. */
 	Jobs []SacctJob `json:"jobs"`
-	Meta SlurmMeta `json:"meta"`
+	Meta SlurmMeta  `json:"meta"`
 }
 
 type SacctmgrUser struct {
 	AdministratorLevel []string `json:"administrator_level"`
-	Name string `json:"name"`
+	Name               string   `json:"name"`
 }
 
 type SacctmgrResult struct {
 	Users []SacctmgrUser `json:"users"`
-	Meta SlurmMeta `json:"meta"`
+	Meta  SlurmMeta      `json:"meta"`
 }
 
 const (
 	SLURM_VERSION_INCOMPATIBLE string = "Unable to parse sacct JSON. Is cc-slurm-adapter compatible with this Slurm version?"
-	SLURM_MAX_VER_MAJ int = 24
-	SLURM_MAX_VER_MIN int = 11
+	SLURM_MAX_VER_MAJ          int    = 24
+	SLURM_MAX_VER_MIN          int    = 11
 )
 
 func (v *SlurmInt) UnmarshalJSON(data []byte) error {
@@ -171,18 +171,18 @@ func (v *SlurmInt) UnmarshalJSON(data []byte) error {
 	 * with our own Unmarshal and Marshal functions. That way we can automatically
 	 * switch between the two variants and simply use "SlurmInt" as type in the structs
 	 * regardless of the Slurm version used. */
-	result := struct{
-		Set *bool `json:"set"`
-		Infinite *bool `json:"infinite"`
-		Number *int64 `json:"number"`
+	result := struct {
+		Set      *bool  `json:"set"`
+		Infinite *bool  `json:"infinite"`
+		Number   *int64 `json:"number"`
 	}{}
 	err := json.Unmarshal(data, &result)
 	if err == nil {
 		if result.Set != nil && result.Infinite != nil && result.Number != nil {
 			*v = SlurmInt{
-				Set: *result.Set,
+				Set:      *result.Set,
 				Infinite: *result.Infinite,
-				Number: *result.Number,
+				Number:   *result.Number,
 			}
 			return nil
 		}
@@ -191,9 +191,9 @@ func (v *SlurmInt) UnmarshalJSON(data []byte) error {
 	result2, err := strconv.ParseInt(string(data), 10, 64)
 	if err == nil {
 		*v = SlurmInt{
-			Set: true,
+			Set:      true,
 			Infinite: false,
-			Number: result2,
+			Number:   result2,
 		}
 		return nil
 	}
@@ -246,7 +246,7 @@ func SlurmQueryJob(jobId uint32) (*SacctJob, error) {
 
 func SlurmQueryJobsTimeRange(begin time.Time, end time.Time) ([]SacctJob, error) {
 	starttime := begin.Format(time.DateTime) // e.g. '2025-02-24 15:00'
-	endtime := end.Format(time.DateTime) // e.g. '2025-02-24 15:00'
+	endtime := end.Format(time.DateTime)     // e.g. '2025-02-24 15:00'
 	stdout, err := callProcess("sacct", "--allusers", "--starttime", starttime, "--endtime", endtime, "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacct /w starttime/endtime: %w. (%s)", err, stdout)
@@ -329,7 +329,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		}
 		resources := make([]*schema.Resource, len(nodes))
 		for i, v := range nodes {
-			resources[i] = &schema.Resource{ Hostname: v }
+			resources[i] = &schema.Resource{Hostname: v}
 		}
 		return resources, nil
 	}
@@ -352,7 +352,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 				if string(*core.Status) != "ALLOCATED" {
 					continue
 				}
-				hwthreads = append(hwthreads, *socket.Index * cpusPerSocket + *core.Index)
+				hwthreads = append(hwthreads, *socket.Index*cpusPerSocket+*core.Index)
 			}
 		}
 
@@ -397,8 +397,8 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 
 		/* Create final result */
 		r := schema.Resource{
-			Hostname: *allocation.Hostname,
-			HWThreads: hwthreads,
+			Hostname:     *allocation.Hostname,
+			HWThreads:    hwthreads,
 			Accelerators: accelerators,
 		}
 		resources = append(resources, &r)
