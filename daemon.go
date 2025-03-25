@@ -58,7 +58,7 @@ func DaemonMain() error {
 	signalCtx, signalCancel := context.WithCancel(context.Background())
 
 	// start background routine that handles the Unix Socket
-	ipcSocketChan := make(chan []byte)
+	ipcSocketChan := make(chan []byte, 1024)
 	go ipcSocketListenRoutine(signalCtx, ipcSocketChan)
 
 	queryDelay := time.Duration(Config.SlurmQueryDelay) * time.Second
