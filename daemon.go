@@ -283,8 +283,8 @@ func processJobEvents() {
 			// Accordingly, cancel the execution of the loop if there is an error.
 			// All leftover job events will get carried over to the next iteration
 			trace.Debug("Job (%s) not ready: %s", jobEvent.SLURM_JOB_ID, err)
-			jobEvent.SacctAttempts += 1
-			if jobEvent.SacctAttempts < 5 {
+			jobEvents[index].SacctAttempts += 1
+			if jobEvents[index].SacctAttempts < 5 {
 				newJobEvents = append(newJobEvents, jobEvents[index:]...)
 				break
 			} else {

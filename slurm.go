@@ -219,7 +219,7 @@ func (v *SlurmString) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func SlurmQueryJob(jobId uint32) (*SacctJob, error) {
+func SlurmQueryJob(jobId uint32) ([]SacctJob, error) {
 	stdout, err := callProcess("sacct", "-j", fmt.Sprintf("%d", jobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacct -j %d: %w", jobId, err)
@@ -237,11 +237,7 @@ func SlurmQueryJob(jobId uint32) (*SacctJob, error) {
 		return nil, fmt.Errorf("Requested job (%d) unavailable", jobId)
 	}
 
-	if len(result.Jobs) >= 2 {
-		return nil, fmt.Errorf("Received more than one job for job %d", jobId)
-	}
-
-	return &result.Jobs[0], nil
+	return result.Jobs, nil
 }
 
 func SlurmQueryJobsTimeRange(begin time.Time, end time.Time) ([]SacctJob, error) {
