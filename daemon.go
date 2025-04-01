@@ -36,11 +36,14 @@ type StopJob struct {
 }
 
 var (
-	ipcSocket  net.Listener
-	httpClient http.Client
-	natsConn   *nats.Conn
-	jobEvents  []PrologEpilogSlurmctldEnv
-	hostname   string
+	ipcSocket        net.Listener
+	httpClient       http.Client
+	natsConn         *nats.Conn
+	jobEvents        []PrologEpilogSlurmctldEnv
+	hostname         string
+	ccJobsCache      map[string]map[int64]bool // map['clusterName'] -> set of Slurm Job IDs, which are currently running
+	ccJobsCacheValid bool
+	ccJobsCacheDate  time.Time
 )
 
 func DaemonMain() error {
@@ -107,6 +110,7 @@ func DaemonMain() error {
 			}
 		case <-pollEventChan:
 			trace.Debug("Timer triggered Slurm polling")
+			ccUpdateCache()
 			processJobEvents()
 			processSlurmSacctPoll()
 			// TODO enable the following line, once we actually implemented
@@ -244,7 +248,88 @@ func daemonInit() error {
 	/* job events queue initialization */
 	jobEvents = make([]PrologEpilogSlurmctldEnv, 0)
 
+	/* Init cc job state cache */
+	trace.Debug("Fetching initial job state from cc-backend")
+	ccUpdateCache()
+
 	trace.Debug("Initialization complete")
+	return nil
+}
+
+func ccUpdateCache() error {
+	/* We maintain a local cache of which jobs are marked as running in cc-backend.
+	 * Only refresh it if the cache was invalidated or if it wasn't refreshed for some time. */
+	if ccJobsCacheValid && ccJobsCacheDate.Add(time.Duration(Config.CcPollInterval)*time.Second).After(time.Now()) {
+		return nil
+	}
+
+	respJobs, err := ccGet("/jobs/?state=running&items-per-page=9999999&page=1&with-metadata=false")
+	if err != nil {
+		ccJobsCacheValid = false
+		return fmt.Errorf("Unable to GET running jobs from cc-backend: %w", err)
+	}
+
+	defer respJobs.Body.Close()
+	body, err := io.ReadAll(respJobs.Body)
+	if err != err {
+		return fmt.Errorf("Unable to GET running jobs from cc-backend: %w", err)
+	}
+
+	if respJobs.StatusCode != 200 {
+		return fmt.Errorf("Calling /jobs/ failed with HTTP %d: %s", respJobs.StatusCode, string(body))
+	}
+
+	getJobsApiResponse := struct {
+		Jobs  []*schema.JobMeta `json:"jobs"`
+		Items int               `json:"items"`
+		Page  int               `json:"page"`
+	}{}
+
+	err = json.Unmarshal(body, &getJobsApiResponse)
+	if err != nil {
+		return fmt.Errorf("Error in JSON returned from cc-backend: %w, JSON: %s", err, body)
+	}
+
+	/* clear cache */
+	ccJobsCacheNew := make(map[string]map[int64]bool)
+
+	/* ... and refill it */
+	jobCount := 0
+	for _, job := range getJobsApiResponse.Jobs {
+		if job == nil {
+			continue
+		}
+
+		if ccJobsCacheNew[job.BaseJob.Cluster] == nil {
+			ccJobsCacheNew[job.BaseJob.Cluster] = make(map[int64]bool)
+		}
+
+		if string(job.BaseJob.State) != "running" {
+			trace.Warn("cc-backend REST API returned job, which isn't running, even though we only asked for running jobs. Ignoring cc-job (i.e. not Slurm job) %d", job.ID)
+			continue
+		}
+
+		ccJobsCacheNew[job.BaseJob.Cluster][job.BaseJob.JobID] = true
+		jobCount++
+	}
+
+	/* Detect if there was drift (there is a difference between our state and cc-backend's state */
+	// TODO this also includes clusters, which aren't the one we are running on. However,
+	// cc-slurm-adapter currently 'doesn't know' which cluster we are serving. It just passes through
+	// the cluster name as required. State of other clusters may change without our interventions, so drift
+	// will occur during normal operation. Disable warning for now.
+	//if ccJobsCacheValid {
+	//	// only test if our cache was considered valid (i.e. maximum cache lifetime elapsed)
+	//	if !reflect.DeepEqual(ccJobsCacheNew, ccJobsCache) {
+	//		trace.Warn("Detected job state differences between local state and our state. Was cc-backend not available for some time?")
+	//	}
+	//}
+
+	ccJobsCacheDate = time.Now()
+	ccJobsCacheValid = true
+	ccJobsCache = ccJobsCacheNew
+
+	trace.Debug("CC Job Cache updated. Number of running jobs: %d", jobCount)
 	return nil
 }
 
@@ -526,7 +611,23 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 func ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
 	trace.Debug("POST to function %s: %s", relApiUrl, string(bodyJson))
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api%s", Config.CcRestUrl, relApiUrl), bytes.NewBuffer(bodyJson))
+	url := fmt.Sprintf("%s/api%s", Config.CcRestUrl, relApiUrl)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJson))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("accept", "application/ld+json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-AUTH-TOKEN", Config.CcRestJwt)
+
+	return httpClient.Do(req)
+}
+
+func ccGet(relApiUrl string) (*http.Response, error) {
+	url := fmt.Sprintf("%s/api%s", Config.CcRestUrl, relApiUrl)
+	trace.Debug("GET to function %s", relApiUrl)
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
