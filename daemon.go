@@ -503,7 +503,7 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		return err
 	}
 
-	if checkIngoreJob(job, startJobData, lastRun) {
+	if checkIgnoreJob(job, startJobData, lastRun) {
 		return nil
 	}
 
@@ -736,7 +736,7 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 	return ccStopJob
 }
 
-func checkIngoreJob(job SacctJob, startJobData *StartJob, lastRun time.Time) bool {
+func checkIgnoreJob(job SacctJob, startJobData *StartJob, lastRun time.Time) bool {
 	/* We may want to filter out certain jobs, that shall not be submitted to cc-backend.
 	 * Put more rules here if necessary. */
 	trace.Debug("Checking whether job %d should be ignored", *job.JobId)
