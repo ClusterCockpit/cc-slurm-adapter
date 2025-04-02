@@ -36,14 +36,14 @@ type StopJob struct {
 }
 
 var (
-	ipcSocket        net.Listener
-	httpClient       http.Client
-	natsConn         *nats.Conn
-	jobEvents        []PrologEpilogSlurmctldEnv
-	hostname         string
-	ccJobsCache      map[string]map[int64]bool // map['clusterName'] -> set of Slurm Job IDs, which are currently running
-	ccJobsCacheValid bool
-	ccJobsCacheDate  time.Time
+	ipcSocket       net.Listener
+	httpClient      http.Client
+	natsConn        *nats.Conn
+	jobEvents       []PrologEpilogSlurmctldEnv
+	hostname        string
+	ccJobState      map[string]map[int64]bool // map['clusterName'] -> set of Slurm Job IDs, which are currently running
+	ccJobStateValid bool
+	ccJobStateDate  time.Time
 )
 
 func DaemonMain() error {
@@ -259,13 +259,13 @@ func daemonInit() error {
 func ccUpdateCache() error {
 	/* We maintain a local cache of which jobs are marked as running in cc-backend.
 	 * Only refresh it if the cache was invalidated or if it wasn't refreshed for some time. */
-	if ccJobsCacheValid && ccJobsCacheDate.Add(time.Duration(Config.CcPollInterval)*time.Second).After(time.Now()) {
+	if ccJobStateValid && ccJobStateDate.Add(time.Duration(Config.CcPollInterval)*time.Second).After(time.Now()) {
 		return nil
 	}
 
 	respJobs, err := ccGet("/jobs/?state=running&items-per-page=9999999&page=1&with-metadata=false")
 	if err != nil {
-		ccJobsCacheValid = false
+		ccJobStateValid = false
 		return fmt.Errorf("Unable to GET running jobs from cc-backend: %w", err)
 	}
 
@@ -291,7 +291,7 @@ func ccUpdateCache() error {
 	}
 
 	/* clear cache */
-	ccJobsCacheNew := make(map[string]map[int64]bool)
+	ccJobStateNew := make(map[string]map[int64]bool)
 
 	/* ... and refill it */
 	jobCount := 0
@@ -300,8 +300,8 @@ func ccUpdateCache() error {
 			continue
 		}
 
-		if ccJobsCacheNew[job.BaseJob.Cluster] == nil {
-			ccJobsCacheNew[job.BaseJob.Cluster] = make(map[int64]bool)
+		if ccJobStateNew[job.BaseJob.Cluster] == nil {
+			ccJobStateNew[job.BaseJob.Cluster] = make(map[int64]bool)
 		}
 
 		if string(job.BaseJob.State) != "running" {
@@ -309,7 +309,7 @@ func ccUpdateCache() error {
 			continue
 		}
 
-		ccJobsCacheNew[job.BaseJob.Cluster][job.BaseJob.JobID] = true
+		ccJobStateNew[job.BaseJob.Cluster][job.BaseJob.JobID] = true
 		jobCount++
 	}
 
@@ -318,16 +318,16 @@ func ccUpdateCache() error {
 	// cc-slurm-adapter currently 'doesn't know' which cluster we are serving. It just passes through
 	// the cluster name as required. State of other clusters may change without our interventions, so drift
 	// will occur during normal operation. Disable warning for now.
-	//if ccJobsCacheValid {
+	//if ccJobStateValid {
 	//	// only test if our cache was considered valid (i.e. maximum cache lifetime elapsed)
-	//	if !reflect.DeepEqual(ccJobsCacheNew, ccJobsCache) {
+	//	if !reflect.DeepEqual(ccJobStateNew, ccJobState) {
 	//		trace.Warn("Detected job state differences between local state and our state. Was cc-backend not available for some time?")
 	//	}
 	//}
 
-	ccJobsCacheDate = time.Now()
-	ccJobsCacheValid = true
-	ccJobsCache = ccJobsCacheNew
+	ccJobStateDate = time.Now()
+	ccJobStateValid = true
+	ccJobState = ccJobStateNew
 
 	trace.Debug("CC Job Cache updated. Number of running jobs: %d", jobCount)
 	return nil
@@ -507,6 +507,28 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		return nil
 	}
 
+	// If this job is already known to cc-backend, there is no need to start it again
+	if ccJobStateCluster, ok := ccJobState[*job.Cluster]; !ok || !ccJobStateCluster[int64(*job.JobId)] {
+		err = ccStartJob(job, startJobData)
+		if err != nil {
+			return err
+		}
+	}
+
+	// TODO If the job already exists in cc-backend, make sure to update values if interested, which may have changed.
+	// In the future, this could be used to implement updating of job time limits, etc.
+
+	/* Only submit stop job, if it has actually finished */
+	if job.Time.End.Number <= 0 {
+		/* A job which hasn't finished, has no end time set. This is easier than
+		 * comparing against all possible job states. */
+		return nil
+	}
+
+	return ccStopJob(job)
+}
+
+func ccStartJob(job SacctJob, startJobData *StartJob) error {
 	startJobDataJSON, err := json.Marshal(startJobData)
 	if err != nil {
 		return fmt.Errorf("Unable to convert StartJob to JSON: %w", err)
@@ -524,12 +546,12 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 	}
 
 	if respStart.StatusCode != 201 && respStart.StatusCode != 422 {
-		/* If the POST is not successful or if the entry already exists (which is ok),
-		 * raise an error. */
-
+		// If the POST is not successful raise an error.
 		return fmt.Errorf("Calling /jobs/start_job/ (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStart.StatusCode, string(body))
 	}
 
+	// Status Code 201 -> the job was newly created
+	// Status Code 422 -> the job already existed
 	if respStart.StatusCode == 201 {
 		trace.Debug("Sending start_job to NATS for job %d", job.JobId)
 		tags := map[string]string{
@@ -549,16 +571,15 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		}
 	}
 
-	// TODO If the job already exists in cc-backend, make sure to update values if interested, which may have changed.
-	// In the future, this could be used to implement updating of job time limits, etc.
-
-	/* Only submit stop job, if it has actually finished */
-	if job.Time.End.Number <= 0 {
-		/* A job which hasn't finished, has no end time set. This is easier than
-		 * comparing against all possible job states. */
-		return nil
+	if _, ok := ccJobState[*job.Cluster]; !ok {
+		ccJobState[*job.Cluster] = make(map[int64]bool)
+		ccJobState[*job.Cluster][int64(*job.JobId)] = true
 	}
 
+	return nil
+}
+
+func ccStopJob(job SacctJob) error {
 	stopJobData := slurmJobToCcStopJob(job)
 	stopJobDataJSON, err := json.Marshal(stopJobData)
 	if err != nil {
@@ -571,7 +592,7 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 	}
 
 	defer respStop.Body.Close()
-	body, err = io.ReadAll(respStop.Body)
+	body, err := io.ReadAll(respStop.Body)
 	if err != nil {
 		return err
 	}
