@@ -67,17 +67,22 @@ func DaemonMain() error {
 	go ipcSocketListenRoutine(signalCtx, ipcSocketChan)
 
 	queryDelay := time.Duration(Config.SlurmQueryDelay) * time.Second
+
 	pollEventInterval := time.Duration(Config.SlurmPollInterval) * time.Second
-	pollEventChan := make(chan struct{})
-	pollEventTimer := time.AfterFunc(queryDelay, func() { pollEventChan <- struct{}{} })
-	pollEventNext := time.Now().Add(queryDelay)
+	pollEventTicker := time.NewTicker(queryDelay)
+	pollEventFirst := true
+
+	jobEventTimer := time.NewTimer(time.Duration(0))
+	<-jobEventTimer.C
+	jobEventPending := false
 
 	/* Signal Handler definition */
 	go func() {
 		<-signalChan
 		trace.Debug("Received signal, shutting down...")
 
-		pollEventTimer.Stop()
+		pollEventTicker.Stop()
+		jobEventTimer.Stop()
 
 		// cause Accept() on Unix socket to fail and unblock its routine.
 		signalCancel()
@@ -106,7 +111,7 @@ func DaemonMain() error {
 			return nil
 		case msg := <-ipcSocketChan:
 			trace.Debug("Process IPC message (%d pending messages)", len(ipcSocketChan))
-			err = processJobNotify(msg)
+			err = jobEventEnqueue(msg)
 			if err != nil {
 				trace.Error("Unable to parse IPC message: %s", err)
 			}
@@ -114,28 +119,30 @@ func DaemonMain() error {
 			/* We want to quickly poll Slurm after a job notification came in.
 			 * Though, we have to make sure we don't infinitely reset the timer if the IPC channel gets spammed.
 			 * This would otherwise cause the timer to continoulsy get reset and never actually fire. */
-			if pollEventNext.After(time.Now().Add(queryDelay)) {
-				pollEventNext = time.Now().Add(queryDelay)
-				pollEventTimer.Reset(queryDelay)
+			if !jobEventPending {
+				jobEventTimer.Reset(queryDelay)
+				jobEventPending = true
 			}
-		case <-pollEventChan:
-			trace.Debug("Timer triggered Slurm polling")
+		case t := <-jobEventTimer.C:
+			trace.Debug("Job Event timer triggered: %v", t)
+			jobEventsProcess()
+			if len(jobEvents) > 0 {
+				jobEventTimer.Reset(queryDelay)
+			} else {
+				jobEventPending = false
+			}
+		case t := <-pollEventTicker.C:
+			trace.Debug("Poll Event Timer triggered: %v", t)
+			if pollEventFirst {
+				// The first time, the ticker is run with very small interval, to avoid startup delay.
+				// Increase the interval to the normal interval after the first trigger.
+				pollEventFirst = false
+				pollEventTicker.Reset(pollEventInterval)
+			}
+
 			ccUpdateCache()
-			processJobEvents()
 			processSlurmSacctPoll()
 			processSlurmSqueuePoll()
-
-			if len(jobEvents) > 0 {
-				/* If there are still jobs in the event queue,
-				 * reschedule in the next few seconds. */
-				pollEventNext = time.Now().Add(queryDelay)
-				pollEventTimer.Reset(queryDelay)
-			} else {
-				/* If there are no jobs in the event queue,
-				 * wait longer until the next poll. */
-				pollEventNext = time.Now().Add(pollEventInterval)
-				pollEventTimer.Reset(pollEventInterval)
-			}
 		}
 
 		trace.Debug("Main loop iteration complete, waiting for next event...")
@@ -338,7 +345,7 @@ func ccUpdateCache() error {
 	return nil
 }
 
-func processJobNotify(ipcMsg []byte) error {
+func jobEventEnqueue(ipcMsg []byte) error {
 	/* The message received contains a JSON, which contains all relevant
 	 * environment variables from here:
 	 * https://slurm.schedmd.com/prolog_epilog.html.
@@ -357,8 +364,8 @@ func processJobNotify(ipcMsg []byte) error {
 	return nil
 }
 
-func processJobEvents() {
-	trace.Debug("processJobEvents()")
+func jobEventsProcess() {
+	trace.Debug("jobEventsProcess()")
 	newJobEvents := make([]PrologEpilogSlurmctldEnv, 0)
 	for index, jobEvent := range jobEvents {
 		jobEventId, err := strconv.ParseUint(jobEvent.SLURM_JOB_ID, 10, 32)

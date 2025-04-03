@@ -34,8 +34,8 @@ type ProgramConfig struct {
 	IpcSockPath       string              `json:"ipcSocketPath"`
 	LastRunPath       string              `json:"lastRunPath"`
 	SlurmPollInterval int                 `json:"slurmPollInterval"`
-	SlurmQueryDelay   int                 `json:"slurmQueryDelay"`
-	SlurmQueryMaxSpan int                 `json:"slurmQueryMaxSpan"`
+	SlurmQueryDelay   int                 `json:"slurmQueryDelay"`   // TODO give this a better name
+	SlurmQueryMaxSpan int                 `json:"slurmQueryMaxSpan"` // TODO change the name of this
 	SlurmMaxRetries   int                 `json:"slurmMaxRetries"`
 	CcRestUrl         string              `json:"ccRestUrl"`
 	CcRestJwt         string              `json:"ccRestJwt"`
