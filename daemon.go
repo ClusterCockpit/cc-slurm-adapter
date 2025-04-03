@@ -368,8 +368,12 @@ func processJobEvents() {
 		}
 
 		jobEventCluster := jobEvent.SLURM_CLUSTER_NAME
+		if !slices.Contains(slurmClusters, jobEventCluster) {
+			trace.Warn("SLURM_CLUSTER_NAME=%s is not managed by us. This should usually not happen or it means that the PrEp hook notified us about a job's cluster, which wasn't reported by 'sinfo'", jobEventCluster)
+			continue
+		}
 
-		_, err = SlurmQueryJob(jobEventCluster, uint32(jobEventId))
+		queriedJobs, err := SlurmQueryJob(jobEventCluster, uint32(jobEventId))
 		if err != nil {
 			// We want to avoid job events getting delivered out of order.
 			// Accordingly, cancel the execution of the loop if there is an error.
@@ -380,8 +384,20 @@ func processJobEvents() {
 				newJobEvents = append(newJobEvents, jobEvents[index:]...)
 				break
 			} else {
-				trace.Warn("Job (%s) exceeded max query retries of %d. Giving up on job.", jobEvent.SLURM_JOB_ID, Config.SlurmMaxRetries)
+				trace.Warn("Job (%d) exceeded max query retries of %d. Giving up on job.", jobEventId, Config.SlurmMaxRetries)
 				continue
+			}
+		}
+
+		for _, job := range queriedJobs {
+			if *job.JobId != uint32(jobEventId) {
+				// Array job queries will return job IDs, which are not the ones that we actually queried
+				continue
+			}
+
+			err = ccSyncJob(job)
+			if err != nil {
+				trace.Warn("Syncing job (%s) via PrEp hook failed. Trying later during regular poll...", jobEventId)
 			}
 		}
 	}
@@ -420,7 +436,7 @@ func processSlurmSacctPoll() {
 		}
 
 		for _, job := range jobs {
-			err = ccSyncJob(job, lastRun)
+			err = ccSyncJob(job)
 			if err != nil {
 				trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 				return
@@ -443,11 +459,9 @@ func processSlurmSqueuePoll() {
 			return
 		}
 
-		lastRun := lastRunGet().Add(time.Duration(-1 * time.Second)) // -1 second for good measure to avoid overlap error
-
 		slurmIsJobRunning := make(map[int64]bool)
 		for _, job := range jobs {
-			err = ccSyncJob(job, lastRun)
+			err = ccSyncJob(job)
 			if err != nil {
 				trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 				return
@@ -478,7 +492,7 @@ func processSlurmSqueuePoll() {
 
 					found = true
 
-					err = ccSyncJob(job, lastRun)
+					err = ccSyncJob(job)
 					if err != nil {
 						trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
 					}
@@ -534,7 +548,7 @@ func lastRunSet(timeStamp time.Time) {
 	}
 }
 
-func ccSyncJob(job SacctJob, lastRun time.Time) error {
+func ccSyncJob(job SacctJob) error {
 	/* Assert the job exists in cc-backend. Ignore if the job already exists. */
 	if Config.CcRestUrl == "" {
 		trace.Info("Skipping submission to ClusterCockpit REST. Missing URL. This feature is optional, so we will continue running")
@@ -546,7 +560,7 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 		return err
 	}
 
-	if checkIgnoreJob(job, startJobData, lastRun) {
+	if checkIgnoreJob(job, startJobData) {
 		return nil
 	}
 
@@ -807,16 +821,10 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 	return ccStopJob
 }
 
-func checkIgnoreJob(job SacctJob, startJobData *StartJob, lastRun time.Time) bool {
+func checkIgnoreJob(job SacctJob, startJobData *StartJob) bool {
 	/* We may want to filter out certain jobs, that shall not be submitted to cc-backend.
 	 * Put more rules here if necessary. */
 	trace.Debug("Checking whether job %d should be ignored", *job.JobId)
-
-	startTime := time.Unix(job.Time.Start.Number, 0)
-	if startTime.Before(lastRun) && job.Time.End.Number <= 0 {
-		trace.Debug("Not submitting job %d, with startTime (%s) before lastRun (%s), that hasn't ended yet. This job has likely already been submitted.", *job.JobId, startTime, lastRun)
-		return true
-	}
 
 	if len(startJobData.Resources) == 0 {
 		trace.Info("Ignoring job %d, which has no resources associated. This job was probably never scheduled.", *job.JobId)
