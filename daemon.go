@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -44,6 +45,7 @@ var (
 	ccJobState      map[string]map[int64]bool // map['clusterName'] -> set of Slurm Job IDs, which are currently running
 	ccJobStateValid bool
 	ccJobStateDate  time.Time
+	slurmClusters   []string
 )
 
 func DaemonMain() error {
@@ -82,6 +84,12 @@ func DaemonMain() error {
 		ipcSocket.Close()
 	}()
 
+	/* Get Slurm clusters */
+	slurmClusters, err = SlurmGetClusterNames()
+	if err != nil {
+		return fmt.Errorf("Unable to determine cluster hostnames: %w", err)
+	}
+
 	for {
 		/* Wait for the following cases:
 		 * - quit signal
@@ -113,9 +121,7 @@ func DaemonMain() error {
 			ccUpdateCache()
 			processJobEvents()
 			processSlurmSacctPoll()
-			// TODO enable the following line, once we actually implemented
-			// Updating of jobs, after they've started
-			//processSlurmSqueuePoll()
+			processSlurmSqueuePoll()
 
 			if len(jobEvents) > 0 {
 				/* If there are still jobs in the event queue,
@@ -300,6 +306,13 @@ func ccUpdateCache() error {
 			continue
 		}
 
+		if !slices.Contains(slurmClusters, job.BaseJob.Cluster) {
+			// Ignore all jobs returned, which our Slurm cluster doesn't manage.
+			// Perhaps it would be nicer to adjust the REST request to not submit them
+			// in the first place.
+			continue
+		}
+
 		if ccJobStateNew[job.BaseJob.Cluster] == nil {
 			ccJobStateNew[job.BaseJob.Cluster] = make(map[int64]bool)
 		}
@@ -312,18 +325,6 @@ func ccUpdateCache() error {
 		ccJobStateNew[job.BaseJob.Cluster][job.BaseJob.JobID] = true
 		jobCount++
 	}
-
-	/* Detect if there was drift (there is a difference between our state and cc-backend's state */
-	// TODO this also includes clusters, which aren't the one we are running on. However,
-	// cc-slurm-adapter currently 'doesn't know' which cluster we are serving. It just passes through
-	// the cluster name as required. State of other clusters may change without our interventions, so drift
-	// will occur during normal operation. Disable warning for now.
-	//if ccJobStateValid {
-	//	// only test if our cache was considered valid (i.e. maximum cache lifetime elapsed)
-	//	if !reflect.DeepEqual(ccJobStateNew, ccJobState) {
-	//		trace.Warn("Detected job state differences between local state and our state. Was cc-backend not available for some time?")
-	//	}
-	//}
 
 	ccJobStateDate = time.Now()
 	ccJobStateValid = true
@@ -362,7 +363,9 @@ func processJobEvents() {
 			continue
 		}
 
-		_, err = SlurmQueryJob(uint32(jobEventId))
+		jobEventCluster := jobEvent.SLURM_CLUSTER_NAME
+
+		_, err = SlurmQueryJob(jobEventCluster, uint32(jobEventId))
 		if err != nil {
 			// We want to avoid job events getting delivered out of order.
 			// Accordingly, cancel the execution of the loop if there is an error.
@@ -405,46 +408,82 @@ func processSlurmSacctPoll() {
 		lastRun = lastRun.Add(-time.Duration(endOffset-beginOffset) * time.Second)
 	}
 
-	jobs, err := SlurmQueryJobsTimeRange(lastRun, thisRun)
-	if err != nil {
-		trace.Error("Unable to query Slurm for jobs (is Slurm available?): %s", err)
-		return
-	}
-
-	for _, job := range jobs {
-		err = ccSyncJob(job, lastRun)
+	for _, cluster := range slurmClusters {
+		jobs, err := SlurmQueryJobsTimeRange(cluster, lastRun, thisRun)
 		if err != nil {
-			trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
+			trace.Error("Unable to query Slurm for jobs (is Slurm available?): %s", err)
 			return
 		}
-	}
 
-	if len(jobs) > 0 {
-		// Avoid unecessary time stamp file writes if no jobs were actually submitted since the last check
-		lastRunSet(thisRun)
+		for _, job := range jobs {
+			err = ccSyncJob(job, lastRun)
+			if err != nil {
+				trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
+				return
+			}
+		}
+
+		if len(jobs) > 0 {
+			// Avoid unecessary time stamp file writes if no jobs were actually submitted since the last check
+			lastRunSet(thisRun)
+		}
 	}
 }
 
 func processSlurmSqueuePoll() {
 	trace.Debug("processSlurmSqueuePoll()")
-	jobs, err := SlurmQueryJobsActive()
-	if err != nil {
-		trace.Error("Unable to query Slurm via squeue (is Slurm available?): %s", err)
-		return
-	}
-
-	lastRun := lastRunGet().Add(time.Duration(-1 * time.Second)) // -1 second for good measure to avoid overlap error
-
-	for _, job := range jobs {
-		// TODO This case still doesn't function correctly.
-		// This will need ccSyncJob to have some kind of feedback mechanism with cc-backend
-		// to query non-completed jobs and retrieve their state.
-		// UPDATE: We now have a cache of cc-backend's job state. However, at the moment this is only
-		// the job ID. We could extend this to the full job, which would allow us to detect, if anything has changed.
-		err = ccSyncJob(job, lastRun)
+	for _, cluster := range slurmClusters {
+		jobs, err := SlurmQueryJobsActive(cluster)
 		if err != nil {
-			trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
+			trace.Error("Unable to query Slurm via squeue (is Slurm available?): %s", err)
 			return
+		}
+
+		lastRun := lastRunGet().Add(time.Duration(-1 * time.Second)) // -1 second for good measure to avoid overlap error
+
+		slurmIsJobRunning := make(map[int64]bool)
+		for _, job := range jobs {
+			err = ccSyncJob(job, lastRun)
+			if err != nil {
+				trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
+				return
+			}
+
+			slurmIsJobRunning[int64(*job.JobId)] = true
+		}
+
+		// Check if there are any stale jobs in cc-backend, which are no longer known to Slurm.
+		// This should usually not happen, but in the past Slurm would occasionally lie to use and we would miss
+		// job stops.
+		for jobId, _ := range ccJobState[cluster] {
+			if !slurmIsJobRunning[jobId] {
+				trace.Warn("Detected stale job in cc-backend (jobId=%d cluster=%s). Trying to synchronize...")
+				jobsQueried, err := SlurmQueryJob(cluster, uint32(jobId))
+				if err != nil {
+					trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
+					continue
+				}
+
+				// When a job ID is queried, which is part of an array job, SlurmQueryJob
+				// will return all jobs related to this array job
+				found := false
+				for _, job := range jobsQueried {
+					if int64(*job.JobId) != jobId {
+						continue
+					}
+
+					found = true
+
+					err = ccSyncJob(job, lastRun)
+					if err != nil {
+						trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
+					}
+				}
+
+				if !found {
+					trace.Error("Slurm returned no jobs, which match cluster=%s jobid=%d: %+v", jobsQueried)
+				}
+			}
 		}
 	}
 }
@@ -508,7 +547,7 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 	}
 
 	// If this job is already known to cc-backend, there is no need to start it again
-	if ccJobStateCluster, ok := ccJobState[*job.Cluster]; !ok || !ccJobStateCluster[int64(*job.JobId)] {
+	if ccJobState[*job.Cluster] == nil || !ccJobState[*job.Cluster][int64(*job.JobId)] {
 		err = ccStartJob(job, startJobData)
 		if err != nil {
 			return err
@@ -517,6 +556,9 @@ func ccSyncJob(job SacctJob, lastRun time.Time) error {
 
 	// TODO If the job already exists in cc-backend, make sure to update values if interested, which may have changed.
 	// In the future, this could be used to implement updating of job time limits, etc.
+	// At the moment, we can't do this yet, because cc-backend doesn't have an API endpoint to alter an existing job.
+	// We also need to store the addition job information, which we fetch from cc-backend.
+	// ccJobState currently only contains the job ID, while all other information from the jobs is discarded.
 
 	/* Only submit stop job, if it has actually finished */
 	if job.Time.End.Number <= 0 {
@@ -571,7 +613,7 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 		}
 	}
 
-	if _, ok := ccJobState[*job.Cluster]; !ok {
+	if ccJobState[*job.Cluster] == nil {
 		ccJobState[*job.Cluster] = make(map[int64]bool)
 		ccJobState[*job.Cluster][int64(*job.JobId)] = true
 	}
@@ -624,6 +666,10 @@ func ccStopJob(job SacctJob) error {
 				trace.Warn("Unable to publish message on NATS for job %d: %s", *job.JobId, err)
 			}
 		}
+	}
+
+	if ccJobState[*job.Cluster] != nil {
+		delete(ccJobState[*job.Cluster], int64(*job.JobId))
 	}
 
 	return nil
