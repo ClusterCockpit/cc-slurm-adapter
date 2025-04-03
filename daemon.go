@@ -137,6 +137,8 @@ func DaemonMain() error {
 				pollEventTimer.Reset(pollEventInterval)
 			}
 		}
+
+		trace.Debug("Main loop iteration complete, waiting for next event...")
 	}
 }
 
