@@ -42,7 +42,12 @@ var (
 	natsConn        *nats.Conn
 	jobEvents       []PrologEpilogSlurmctldEnv
 	hostname        string
-	ccJobState      map[string]map[int64]bool // map['clusterName'] -> set of Slurm Job IDs, which are currently running
+	// map['clusterName'] -> set of Slurm Job IDs, which are currently running.
+	// When a jobs is started, they are inserted into the map as 'true'. Then they are stopped
+	// they are set as 'false'. Only then ccCacheGC runs, they are actually removed.
+	// That way, if job is quickly started and stopped via PrEp event, we still know the job,
+	// and don't send out a (thus failing) start_job event.
+	ccJobState      map[string]map[int64]bool
 	ccJobStateValid bool
 	ccJobStateDate  time.Time
 	slurmClusters   []string
@@ -89,14 +94,6 @@ func DaemonMain() error {
 		ipcSocket.Close()
 	}()
 
-	/* Get Slurm clusters */
-	slurmClusters, err = SlurmGetClusterNames()
-	if err != nil {
-		return fmt.Errorf("Unable to determine cluster hostnames: %w", err)
-	}
-
-	trace.Debug("Detected Slurm clusters: %v", slurmClusters)
-
 	for {
 		/* Wait for the following cases:
 		 * - quit signal
@@ -140,9 +137,10 @@ func DaemonMain() error {
 				pollEventTicker.Reset(pollEventInterval)
 			}
 
-			ccUpdateCache()
+			ccCacheUpdate()
 			processSlurmSacctPoll()
 			processSlurmSqueuePoll()
+			ccCacheGC()
 		}
 
 		trace.Debug("Main loop iteration complete, waiting for next event...")
@@ -265,15 +263,22 @@ func daemonInit() error {
 	/* job events queue initialization */
 	jobEvents = make([]PrologEpilogSlurmctldEnv, 0)
 
+	/* Get the clusters managed by Slurm */
+	slurmClusters, err = SlurmGetClusterNames()
+	if err != nil {
+		return fmt.Errorf("Unable to determine cluster hostnames: %w", err)
+	}
+	trace.Debug("Detected Slurm clusters: %v", slurmClusters)
+
 	/* Init cc job state cache */
 	trace.Debug("Fetching initial job state from cc-backend")
-	ccUpdateCache()
+	ccCacheUpdate()
 
 	trace.Debug("Initialization complete")
 	return nil
 }
 
-func ccUpdateCache() error {
+func ccCacheUpdate() error {
 	/* We maintain a local cache of which jobs are marked as running in cc-backend.
 	 * Only refresh it if the cache was invalidated or if it wasn't refreshed for some time. */
 	if ccJobStateValid && ccJobStateDate.Add(time.Duration(Config.CcPollInterval)*time.Second).After(time.Now()) {
@@ -310,6 +315,11 @@ func ccUpdateCache() error {
 	/* clear cache */
 	ccJobStateNew := make(map[string]map[int64]bool)
 
+	/* Create the new cache for all the clusters that we managed. */
+	for _, cluster := range slurmClusters {
+		ccJobStateNew[cluster] = make(map[int64]bool)
+	}
+
 	/* ... and refill it */
 	jobCount := 0
 	for _, job := range getJobsApiResponse.Jobs {
@@ -317,15 +327,11 @@ func ccUpdateCache() error {
 			continue
 		}
 
-		if !slices.Contains(slurmClusters, job.BaseJob.Cluster) {
+		if ccJobStateNew[job.BaseJob.Cluster] == nil {
 			// Ignore all jobs returned, which our Slurm cluster doesn't manage.
 			// Perhaps it would be nicer to adjust the REST request to not submit them
 			// in the first place.
 			continue
-		}
-
-		if ccJobStateNew[job.BaseJob.Cluster] == nil {
-			ccJobStateNew[job.BaseJob.Cluster] = make(map[int64]bool)
 		}
 
 		if string(job.BaseJob.State) != "running" {
@@ -343,6 +349,16 @@ func ccUpdateCache() error {
 
 	trace.Debug("CC Job Cache updated. Number of running jobs: %d", jobCount)
 	return nil
+}
+
+func ccCacheGC() {
+	for _, jobIds := range ccJobState {
+		for jobId, running := range jobIds {
+			if !running {
+				delete(jobIds, jobId)
+			}
+		}
+	}
 }
 
 func jobEventEnqueue(ipcMsg []byte) error {
@@ -555,12 +571,17 @@ func ccSyncJob(job SacctJob) error {
 		return nil
 	}
 
-	// If this job is already known to cc-backend, there is no need to start it again
-	if ccJobState[*job.Cluster] == nil || !ccJobState[*job.Cluster][int64(*job.JobId)] {
-		err = ccStartJob(job, startJobData)
-		if err != nil {
-			return err
+	trace.Debug("======== CACHE STATE =========")
+	for cluster, jobIds := range ccJobState {
+		trace.Debug("- Cluster: %s", cluster)
+		for jobId, running := range jobIds {
+			trace.Debug("   - JobId=%d running=%v", jobId, running)
 		}
+	}
+
+	err = ccStartJob(job, startJobData)
+	if err != nil {
+		return err
 	}
 
 	// TODO If the job already exists in cc-backend, make sure to update values if interested, which may have changed.
@@ -580,6 +601,11 @@ func ccSyncJob(job SacctJob) error {
 }
 
 func ccStartJob(job SacctJob, startJobData *StartJob) error {
+	_, jobKnown := ccJobState[*job.Cluster][int64(*job.JobId)]
+	if jobKnown {
+		return nil
+	}
+
 	startJobDataJSON, err := json.Marshal(startJobData)
 	if err != nil {
 		return fmt.Errorf("Unable to convert StartJob to JSON: %w", err)
@@ -622,15 +648,16 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 		}
 	}
 
-	if ccJobState[*job.Cluster] == nil {
-		ccJobState[*job.Cluster] = make(map[int64]bool)
-	}
 	ccJobState[*job.Cluster][int64(*job.JobId)] = true
-
 	return nil
 }
 
 func ccStopJob(job SacctJob) error {
+	jobRunning, jobKnown := ccJobState[*job.Cluster][int64(*job.JobId)]
+	if jobKnown && !jobRunning {
+		return nil
+	}
+
 	stopJobData := slurmJobToCcStopJob(job)
 	stopJobDataJSON, err := json.Marshal(stopJobData)
 	if err != nil {
@@ -677,10 +704,7 @@ func ccStopJob(job SacctJob) error {
 		}
 	}
 
-	if ccJobState[*job.Cluster] != nil {
-		delete(ccJobState[*job.Cluster], int64(*job.JobId))
-	}
-
+	ccJobState[*job.Cluster][int64(*job.JobId)] = false
 	return nil
 }
 
