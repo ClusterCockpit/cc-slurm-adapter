@@ -495,7 +495,11 @@ func processSlurmSqueuePoll() {
 		// Check if there are any stale jobs in cc-backend, which are no longer known to Slurm.
 		// This should usually not happen, but in the past Slurm would occasionally lie to use and we would miss
 		// job stops.
-		for jobId, _ := range ccJobState[cluster] {
+		for jobId, running := range ccJobState[cluster] {
+			if !running {
+				continue
+			}
+
 			if !slurmIsJobRunning[jobId] {
 				trace.Warn("Detected stale job in cc-backend (jobId=%d cluster=%s). Trying to synchronize...")
 				job, err := SlurmQueryJob(cluster, uint32(jobId))
