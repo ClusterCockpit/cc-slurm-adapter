@@ -57,12 +57,12 @@ type ScontrolJobResources struct {
 	CPUs           *SlurmInt                  `json:"cpus"`
 	ThreadsPerCore *SlurmInt                  `json:"threads_per_core"`
 }
-
 type ScontrolJob struct {
 	/* Only (our) required fields are listed here. */
 	JobId        *uint32               `json:"job_id"`
 	JobResources *ScontrolJobResources `json:"job_resources"`
 	Comment      *string               `json:"comment"`
+	Cluster      *string               `json:"cluster"`
 	GresDetail   []string              `json:"gres_detail"`
 	Shared       *SlurmString          `json:"shared"`
 	Exclusive    *SlurmString          `json:"exclusive"`
@@ -248,7 +248,7 @@ func SlurmGetClusterNames() ([]string, error) {
 	return clusterNames, nil
 }
 
-func SlurmQueryJob(clusterName string, jobId uint32) ([]SacctJob, error) {
+func SlurmQueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 	stdout, err := callProcess("sacct", "--cluster", clusterName, "-j", fmt.Sprintf("%d", jobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacct -j %d: %w", jobId, err)
@@ -262,11 +262,17 @@ func SlurmQueryJob(clusterName string, jobId uint32) ([]SacctJob, error) {
 
 	SlurmWarnVersion(result.Meta.Slurm.Version)
 
-	if len(result.Jobs) == 0 {
-		return nil, fmt.Errorf("Requested job (%d) unavailable", jobId)
+	// When a job ID is queried, which is part of an array job, all jobs related to this array job are returned.
+	// Find the one that we actually want.
+	for _, job := range result.Jobs {
+		if *job.JobId == jobId {
+			return &job, nil
+		}
 	}
-
-	return result.Jobs, nil
+	if len(result.Jobs) == 0 {
+		return nil, fmt.Errorf("Requested job (%s, %d) unavailable", clusterName, jobId)
+	}
+	return nil, fmt.Errorf("Requested job (%s, %d) returned jobs, but none with our job ID: %+v", result.Jobs)
 }
 
 func SlurmQueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, error) {
@@ -287,7 +293,7 @@ func SlurmQueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJ
 	return result.Jobs, nil
 }
 
-func SlurmQueryJobsActive(clusterName string) ([]SacctJob, error) {
+func SlurmQueryJobsActive(clusterName string) ([]ScontrolJob, error) {
 	stdout, err := callProcess("squeue", "--cluster", clusterName, "--all", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run squeue: %w", err)
@@ -296,7 +302,7 @@ func SlurmQueryJobsActive(clusterName string) ([]SacctJob, error) {
 	// squeue requires stripping the cluster header in multi cluster configs
 	stdout = SlurmRemoveClusterPrefix(stdout)
 
-	var result SacctResult
+	var result ScontrolResult // scontrol and squeue appear to use the same scheme
 	err = json.Unmarshal([]byte(stdout), &result)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)

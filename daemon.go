@@ -380,12 +380,12 @@ func jobEventsProcess() {
 			continue
 		}
 
-		queriedJobs, err := SlurmQueryJob(jobEventCluster, uint32(jobEventId))
+		job, err := SlurmQueryJob(jobEventCluster, uint32(jobEventId))
 		if err != nil {
 			// We want to avoid job events getting delivered out of order.
 			// Accordingly, cancel the execution of the loop if there is an error.
 			// All leftover job events will get carried over to the next iteration
-			trace.Debug("Job (%s) not ready: %s", jobEvent.SLURM_JOB_ID, err)
+			trace.Debug("Job (%s) not ready: %v", jobEvent.SLURM_JOB_ID, err)
 			jobEvents[index].SacctAttempts += 1
 			if jobEvents[index].SacctAttempts < 5 {
 				newJobEvents = append(newJobEvents, jobEvents[index:]...)
@@ -396,16 +396,9 @@ func jobEventsProcess() {
 			}
 		}
 
-		for _, job := range queriedJobs {
-			if *job.JobId != uint32(jobEventId) {
-				// Array job queries will return job IDs, which are not the ones that we actually queried
-				continue
-			}
-
-			err = ccSyncJob(job)
-			if err != nil {
-				trace.Warn("Syncing job (%s) via PrEp hook failed. Trying later during regular poll...", jobEventId)
-			}
+		err = ccSyncJob(*job)
+		if err != nil {
+			trace.Warn("Syncing job (%s, %d) via PrEp hook failed. Trying later during regular poll...", jobEventCluster, jobEventId)
 		}
 	}
 
@@ -462,19 +455,25 @@ func processSlurmSqueuePoll() {
 	for _, cluster := range slurmClusters {
 		jobs, err := SlurmQueryJobsActive(cluster)
 		if err != nil {
-			trace.Error("Unable to query Slurm via squeue (is Slurm available?): %s", err)
+			trace.Error("Unable to query Slurm via squeue (is Slurm available?): %v", err)
 			return
 		}
 
 		slurmIsJobRunning := make(map[int64]bool)
-		for _, job := range jobs {
-			err = ccSyncJob(job)
+		for _, scJob := range jobs {
+			saJob, err := SlurmQueryJob(*scJob.Cluster, *scJob.JobId)
 			if err != nil {
-				trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
+				trace.Error("Unable to query Slurm (is Slurm available?): %v", err)
 				return
 			}
 
-			slurmIsJobRunning[int64(*job.JobId)] = true
+			err = ccSyncJob(*saJob)
+			if err != nil {
+				trace.Error("Syncing job to ClusterCockpit failed (%v). Trying later...", err)
+				return
+			}
+
+			slurmIsJobRunning[int64(*scJob.JobId)] = true
 		}
 
 		// Check if there are any stale jobs in cc-backend, which are no longer known to Slurm.
@@ -483,30 +482,15 @@ func processSlurmSqueuePoll() {
 		for jobId, _ := range ccJobState[cluster] {
 			if !slurmIsJobRunning[jobId] {
 				trace.Warn("Detected stale job in cc-backend (jobId=%d cluster=%s). Trying to synchronize...")
-				jobsQueried, err := SlurmQueryJob(cluster, uint32(jobId))
+				job, err := SlurmQueryJob(cluster, uint32(jobId))
 				if err != nil {
 					trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
 					continue
 				}
 
-				// When a job ID is queried, which is part of an array job, SlurmQueryJob
-				// will return all jobs related to this array job
-				found := false
-				for _, job := range jobsQueried {
-					if int64(*job.JobId) != jobId {
-						continue
-					}
-
-					found = true
-
-					err = ccSyncJob(job)
-					if err != nil {
-						trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
-					}
-				}
-
-				if !found {
-					trace.Error("Slurm returned no jobs, which match cluster=%s jobid=%d: %+v", jobsQueried)
+				err = ccSyncJob(*job)
+				if err != nil {
+					trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
 				}
 			}
 		}
