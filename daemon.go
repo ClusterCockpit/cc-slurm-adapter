@@ -575,14 +575,6 @@ func ccSyncJob(job SacctJob) error {
 		return nil
 	}
 
-	trace.Debug("======== CACHE STATE =========")
-	for cluster, jobIds := range ccJobState {
-		trace.Debug("- Cluster: %s", cluster)
-		for jobId, running := range jobIds {
-			trace.Debug("   - JobId=%d running=%v", jobId, running)
-		}
-	}
-
 	err = ccStartJob(job, startJobData)
 	if err != nil {
 		return err
