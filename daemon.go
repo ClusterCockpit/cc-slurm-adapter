@@ -624,8 +624,8 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 
 	if ccJobState[*job.Cluster] == nil {
 		ccJobState[*job.Cluster] = make(map[int64]bool)
-		ccJobState[*job.Cluster][int64(*job.JobId)] = true
 	}
+	ccJobState[*job.Cluster][int64(*job.JobId)] = true
 
 	return nil
 }
