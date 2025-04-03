@@ -90,6 +90,8 @@ func DaemonMain() error {
 		return fmt.Errorf("Unable to determine cluster hostnames: %w", err)
 	}
 
+	trace.Debug("Detected Slurm clusters: %v", slurmClusters)
+
 	for {
 		/* Wait for the following cases:
 		 * - quit signal
