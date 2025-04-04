@@ -40,7 +40,7 @@ type ProgramConfig struct {
 	CcRestUrl         string              `json:"ccRestUrl"`
 	CcRestJwt         string              `json:"ccRestJwt"`
 	CcPollInterval    int                 `json:"ccPollInterval"`
-	GpuPciAddrs       map[string][]string `json:"nvidiaPciAddrs"`
+	GpuPciAddrs       map[string][]string `json:"gpuPciAddrs"`
 	IgnoreHosts       string              `json:"ignoreHosts"`
 	NatsServer        string              `json:"natsServer"`
 	NatsPort          uint16              `json:"natsPort"`
@@ -52,6 +52,7 @@ type ProgramConfig struct {
 }
 
 func LoadConfig(configPath string) {
+	orgConfigPath := configPath
 	if configPath == "" {
 		configPath = DEFAULT_CONFIG_PATH
 	}
@@ -73,7 +74,11 @@ func LoadConfig(configPath string) {
 
 	fileContents, err := os.ReadFile(configPath)
 	if err != nil {
-		trace.Info("Unable to read config file, using default values: %s", err)
+		if orgConfigPath == "" {
+			trace.Info("Unable to read config file, using default values: %v", err)
+		} else {
+			trace.Fatal("Unable to read config file: %v", err)
+		}
 	} else {
 		err = json.Unmarshal(fileContents, &newConf)
 		if err != nil {
