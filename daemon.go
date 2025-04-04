@@ -37,11 +37,11 @@ type StopJob struct {
 }
 
 var (
-	ipcSocket       net.Listener
-	httpClient      http.Client
-	natsConn        *nats.Conn
-	jobEvents       []PrologEpilogSlurmctldEnv
-	hostname        string
+	ipcSocket  net.Listener
+	httpClient http.Client
+	natsConn   *nats.Conn
+	jobEvents  []PrologEpilogSlurmctldEnv
+	hostname   string
 	// map['clusterName'] -> set of Slurm Job IDs, which are currently running.
 	// When a jobs is started, they are inserted into the map as 'true'. Then they are stopped
 	// they are set as 'false'. Only then ccCacheGC runs, they are actually removed.

@@ -501,8 +501,8 @@ func SlurmGetOutputForClusters(stdout string) map[string]string {
 		// it ends at the end of the entire stdout string.
 		blockBeg := matchPositions[1]
 		blockEnd := len(stdout)
-		if i + 1 < len(matchPositions) {
-			blockEnd = allMatchPositions[i + 1][0]
+		if i+1 < len(matchPositions) {
+			blockEnd = allMatchPositions[i+1][0]
 		}
 		result[clusterName] = stdout[blockBeg:blockEnd]
 	}
