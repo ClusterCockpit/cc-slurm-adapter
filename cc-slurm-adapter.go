@@ -14,9 +14,6 @@ func main() {
 	var daemon bool
 	flag.BoolVar(&daemon, "daemon", false, "Start cc-slurm-adapter daemon. Prolog and Epilog calls require a running daemon.")
 
-	var nvidiaDetect bool
-	flag.BoolVar(&nvidiaDetect, "nvidia-detect", false, "Detect Nvidia GPUs in this system for use in the accelerator config.")
-
 	var debugLevel int
 	flag.IntVar(&debugLevel, "debug", 2, "Set log level")
 
@@ -34,9 +31,6 @@ func main() {
 	if help {
 		flag.PrintDefaults()
 		os.Exit(0)
-	} else if nvidiaDetect {
-		mode = "Nvidia Detect"
-		err = NvidiaDetectMain()
 	} else if daemon {
 		mode = "Daemon"
 		err = DaemonMain()
