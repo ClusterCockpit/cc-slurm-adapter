@@ -63,7 +63,7 @@ func DaemonMain() error {
 	defer daemonQuit()
 
 	/* Init Signal Handling */
-	signalChan := make(chan os.Signal)
+	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 	signalCtx, signalCancel := context.WithCancel(context.Background())
 
@@ -386,7 +386,7 @@ func jobEventsProcess() {
 	for index, jobEvent := range jobEvents {
 		jobEventId, err := strconv.ParseUint(jobEvent.SLURM_JOB_ID, 10, 32)
 		if err != nil {
-			trace.Warn("SLURM_JOB_ID contains non-integer value: %w", err)
+			trace.Warn("SLURM_JOB_ID contains non-integer value: %v", err)
 			continue
 		}
 
@@ -440,7 +440,7 @@ func processSlurmSacctPoll() {
 		 * is actually always before 'end'.
 		 * I am not entirely sure that this works reliably or if Go will correctly
 		 * handle those changes. */
-		trace.Warn("Time change detected: Moving last run %d seconds backwards")
+		trace.Warn("Time change detected: Moving last run %d seconds backwards", endOffset-beginOffset)
 		lastRun = lastRun.Add(-time.Duration(endOffset-beginOffset) * time.Second)
 	}
 
@@ -501,7 +501,7 @@ func processSlurmSqueuePoll() {
 			}
 
 			if !slurmIsJobRunning[jobId] {
-				trace.Warn("Detected stale job in cc-backend (jobId=%d cluster=%s). Trying to synchronize...")
+				trace.Warn("Detected stale job in cc-backend (%s, %d). Trying to synchronize...", cluster, jobId)
 				job, err := SlurmQueryJob(cluster, uint32(jobId))
 				if err != nil {
 					trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)

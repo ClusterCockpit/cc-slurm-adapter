@@ -272,7 +272,7 @@ func SlurmQueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 	if len(result.Jobs) == 0 {
 		return nil, fmt.Errorf("Requested job (%s, %d) unavailable", clusterName, jobId)
 	}
-	return nil, fmt.Errorf("Requested job (%s, %d) returned jobs, but none with our job ID: %+v", result.Jobs)
+	return nil, fmt.Errorf("Requested job (%s, %d) returned jobs, but none with our job ID: %+v", clusterName, jobId, result.Jobs)
 }
 
 func SlurmQueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, error) {
@@ -359,7 +359,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 
 		nodes, err := SlurmGetNodes(saJob)
 		if err != nil {
-			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", err)
+			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", *saJob.JobId, err)
 		}
 		resources := make([]*schema.Resource, len(nodes))
 		for i, v := range nodes {
