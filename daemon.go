@@ -130,6 +130,7 @@ func DaemonMain() error {
 			}
 		case t := <-jobEventTimer.C:
 			trace.Debug("Job Event timer triggered: %v", t)
+			SlurmSacctCacheClear()
 			jobEventsProcess()
 			if len(jobEvents) > 0 {
 				jobEventTimer.Reset(queryDelay)
