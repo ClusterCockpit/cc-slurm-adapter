@@ -57,6 +57,7 @@ type ScontrolJobResources struct {
 	CPUs           *SlurmInt                  `json:"cpus"`
 	ThreadsPerCore *SlurmInt                  `json:"threads_per_core"`
 }
+
 type ScontrolJob struct {
 	/* Only (our) required fields are listed here. */
 	JobId        *uint32               `json:"job_id"`
@@ -169,6 +170,11 @@ const (
 	SLURM_MAX_VER_MIN          int    = 11
 )
 
+var (
+	// We keep a cached version of the Sacct results, since we may otherwise need to execute the same sacct command multiple times per batch run
+	sacctCache map[string]map[uint32]*SacctJob
+)
+
 func (v *SlurmInt) UnmarshalJSON(data []byte) error {
 	/* Slurm at some point has changed the representation of integers in its API.
 	 * Unfortuantely the usage is somewhat mixed, so we use a custom integer type
@@ -248,7 +254,27 @@ func SlurmGetClusterNames() ([]string, error) {
 	return clusterNames, nil
 }
 
+func SlurmSacctCacheClear() {
+	trace.Debug("Clearing Slurm sacct cache")
+	sacctCache = make(map[string]map[uint32]*SacctJob)
+}
+
+func slurmSacctCacheAdd(job *SacctJob) {
+	if sacctCache == nil {
+		sacctCache = make(map[string]map[uint32]*SacctJob)
+	}
+	if sacctCache[*job.Cluster] == nil {
+		sacctCache[*job.Cluster] = make(map[uint32]*SacctJob)
+	}
+	sacctCache[*job.Cluster][*job.JobId] = job
+}
+
 func SlurmQueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
+	if sacctCache[clusterName] != nil && sacctCache[clusterName][jobId] != nil {
+		trace.Debug("Job (%s, %d) already in cache, skipping 'sacct'", clusterName, jobId)
+		return sacctCache[clusterName][jobId], nil
+	}
+
 	stdout, err := callProcess("sacct", "--cluster", clusterName, "-j", fmt.Sprintf("%d", jobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacct -j %d: %w", jobId, err)
@@ -266,6 +292,7 @@ func SlurmQueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 	// Find the one that we actually want.
 	for _, job := range result.Jobs {
 		if *job.JobId == jobId {
+			slurmSacctCacheAdd(&job)
 			return &job, nil
 		}
 	}
@@ -290,6 +317,11 @@ func SlurmQueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJ
 	}
 
 	SlurmWarnVersion(result.Meta.Slurm.Version)
+
+	for _, job := range result.Jobs {
+		slurmSacctCacheAdd(&job)
+	}
+
 	return result.Jobs, nil
 }
 

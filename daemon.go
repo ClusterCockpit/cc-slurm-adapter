@@ -145,6 +145,7 @@ func DaemonMain() error {
 				pollEventTicker.Reset(pollEventInterval)
 			}
 
+			SlurmSacctCacheClear()
 			ccCacheUpdate()
 			processSlurmSacctPoll()
 			processSlurmSqueuePoll()
@@ -321,13 +322,14 @@ func ccCacheUpdate() error {
 	}
 
 	/* init cache if not done so yet */
-	initial := true // TODO set this to false, once we're done testing
+	initial := false
 	if ccJobCache == nil {
 		ccJobCache = make(map[string]map[int64]*CacheJobState)
 		for _, cluster := range slurmClusters {
 			ccJobCache[cluster] = make(map[int64]*CacheJobState)
 		}
 		initial = true
+		trace.Info("Running initial cc-backend <---> cc-slurm-adapter synchronization. This may take a while.")
 	}
 
 	// Create mapping from cluster -> jobid -> job from cc-backend data.
