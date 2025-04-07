@@ -781,7 +781,7 @@ func ccStopJob(job SacctJob) error {
 	}
 
 	if respStop.StatusCode == 200 {
-		trace.Info("Sent stopt_job successfully (%s, %d)", cluster, jobId)
+		trace.Info("Sent stop_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": hostname,
 			"type":     "node",
