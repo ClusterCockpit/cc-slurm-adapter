@@ -129,7 +129,7 @@ func DaemonMain() error {
 				jobEventPending = true
 			}
 		case t := <-jobEventTimer.C:
-			trace.Debug("Job Event timer triggered: %v", t)
+			trace.Info("Job Event timer triggered: %v", t)
 			SlurmSacctCacheClear()
 			jobEventsProcess()
 			if len(jobEvents) > 0 {
@@ -138,7 +138,7 @@ func DaemonMain() error {
 				jobEventPending = false
 			}
 		case t := <-pollEventTicker.C:
-			trace.Debug("Poll Event Timer triggered: %v", t)
+			trace.Info("Poll Event Timer triggered: %v", t)
 			if pollEventFirst {
 				// The first time, the ticker is run with very small interval, to avoid startup delay.
 				// Increase the interval to the normal interval after the first trigger.
@@ -720,7 +720,7 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 	// Status Code 201 -> the job was newly created
 	// Status Code 422 -> the job already existed
 	if respStart.StatusCode == 201 {
-		trace.Debug("Sending start_job to NATS for (%s, %d)", cluster, jobId)
+		trace.Info("Sent start_job successfully (%s, %d)!", cluster, jobId)
 		tags := map[string]string{
 			"hostname": hostname,
 			"type":     "node",
@@ -781,7 +781,7 @@ func ccStopJob(job SacctJob) error {
 	}
 
 	if respStop.StatusCode == 200 {
-		trace.Debug("Sending stop_job to NATS for job (%s, %d)", cluster, jobId)
+		trace.Info("Sent stopt_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": hostname,
 			"type":     "node",
