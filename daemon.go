@@ -297,7 +297,7 @@ func daemonInit() error {
 func ccCacheUpdate() error {
 	/* We maintain a local cache of which jobs are marked as running in cc-backend.
 	 * Only refresh it if the cache was invalidated or if it wasn't refreshed for some time. */
-	if ccJobCacheValid && ccJobCacheDate.Add(time.Duration(Config.CcPollInterval)*time.Second).Before(time.Now()) {
+	if ccJobCacheValid && ccJobCacheDate.Add(time.Duration(Config.CcPollInterval)*time.Second).After(time.Now()) {
 		return nil
 	}
 
