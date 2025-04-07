@@ -146,7 +146,11 @@ func DaemonMain() error {
 			}
 
 			SlurmSacctCacheClear()
-			ccCacheUpdate()
+			err = ccCacheUpdate()
+			if err != nil {
+				trace.Error("Unable to update cc-backend cache. Trying later...")
+				break
+			}
 			processSlurmSacctPoll()
 			processSlurmSqueuePoll()
 			ccCacheGC()
@@ -281,7 +285,10 @@ func daemonInit() error {
 
 	/* Init cc job state cache */
 	trace.Debug("Fetching initial job state from cc-backend")
-	ccCacheUpdate()
+	err = ccCacheUpdate()
+	if err != nil {
+		return fmt.Errorf("Failed to update cc-backend job cache: %w", err)
+	}
 
 	trace.Debug("Initialization complete")
 	return nil
