@@ -55,9 +55,9 @@ var (
 	// but only after CachEvictCountdown as gone down to zero. We do not remove the immediately
 	// to avoid the situation where e.g. a poll event stops a job, and the corresponding PrEp stop event
 	// won't find the job in the cache anymore. In that case, a stop_job would be sent, even the stop would already have stopped.
-	ccJobState      map[string]map[int64]*CacheJobState
-	ccJobStateValid bool
-	ccJobStateDate  time.Time
+	ccJobCache      map[string]map[int64]*CacheJobState
+	ccJobCacheValid bool
+	ccJobCacheDate  time.Time
 	slurmClusters   []string
 )
 
@@ -289,13 +289,13 @@ func daemonInit() error {
 func ccCacheUpdate() error {
 	/* We maintain a local cache of which jobs are marked as running in cc-backend.
 	 * Only refresh it if the cache was invalidated or if it wasn't refreshed for some time. */
-	if ccJobStateValid && ccJobStateDate.Add(time.Duration(Config.CcPollInterval)*time.Second).After(time.Now()) {
+	if ccJobCacheValid && ccJobCacheDate.Add(time.Duration(Config.CcPollInterval)*time.Second).Before(time.Now()) {
 		return nil
 	}
 
 	respJobs, err := ccGet("/jobs/?state=running&items-per-page=9999999&page=1&with-metadata=false")
 	if err != nil {
-		ccJobStateValid = false
+		ccJobCacheValid = false
 		return fmt.Errorf("Unable to GET running jobs from cc-backend: %w", err)
 	}
 
@@ -320,49 +320,116 @@ func ccCacheUpdate() error {
 		return fmt.Errorf("Error in JSON returned from cc-backend: %w, JSON: %s", err, body)
 	}
 
-	/* clear cache */
-	ccJobStateNew := make(map[string]map[int64]*CacheJobState)
-
-	/* Create the new cache for all the clusters that we managed. */
-	for _, cluster := range slurmClusters {
-		ccJobStateNew[cluster] = make(map[int64]*CacheJobState)
+	/* init cache if not done so yet */
+	initial := true // TODO set this to false, once we're done testing
+	if ccJobCache == nil {
+		ccJobCache = make(map[string]map[int64]*CacheJobState)
+		for _, cluster := range slurmClusters {
+			ccJobCache[cluster] = make(map[int64]*CacheJobState)
+		}
+		initial = true
 	}
 
-	/* ... and refill it */
-	jobCount := 0
+	// Create mapping from cluster -> jobid -> job from cc-backend data.
+	// Compare this mapping to our current cache to detect, if there have been differences.
+	ccJobState := make(map[string]map[int64]*schema.JobMeta)
 	for _, job := range getJobsApiResponse.Jobs {
-		if job == nil {
-			continue
+		if ccJobState[job.Cluster] == nil {
+			ccJobState[job.Cluster] = make(map[int64]*schema.JobMeta)
 		}
-
-		if ccJobStateNew[job.BaseJob.Cluster] == nil {
-			// Ignore all jobs returned, which our Slurm cluster doesn't manage.
-			// Perhaps it would be nicer to adjust the REST request to not submit them
-			// in the first place.
-			continue
-		}
-
-		if string(job.BaseJob.State) != "running" {
-			trace.Warn("cc-backend REST API returned job, which isn't running, even though we only asked for running jobs. Ignoring cc-job (i.e. not Slurm job) %d", job.ID)
-			continue
-		}
-
-		ccJobStateNew[job.BaseJob.Cluster][job.BaseJob.JobID] = &CacheJobState{
-			Running: true,
-		}
-		jobCount++
+		ccJobState[job.Cluster][job.JobID] = job
 	}
 
-	ccJobStateDate = time.Now()
-	ccJobStateValid = true
-	ccJobState = ccJobStateNew
+	// Now compare new cc-backend state --> our old cc-backend state
+	ccJobCount := 0
+	for _, ccJobClusterState := range ccJobState {
+		for _, ccJob := range ccJobClusterState {
+			if string(ccJob.State) != "running" {
+				trace.Warn("cc-backend REST API returned job, which isn't running, even though we only asked for running jobs. Ignoring cc-job (i.e. not Slurm job) %d", ccJob.ID)
+				continue
+			}
 
-	trace.Debug("CC Job Cache updated. Number of running jobs: %d", jobCount)
+			if ccJobCache[ccJob.Cluster] == nil {
+				// Skip jobs from cc-backend, which do not belong to the clusters that we manage.
+				// It may be nicer to not request them in the first place, but it's easier for now...
+				continue
+			}
+
+			ccJobCount += 1
+
+			cacheJob, ok := ccJobCache[ccJob.Cluster][ccJob.JobID]
+			if ok && !cacheJob.Running {
+				// All jobs fetched are assumed to be running, so do not allow that cache state.
+				ok = false
+			}
+
+			if ok {
+				continue
+			}
+
+			if !initial {
+				trace.Warn("Cache desync detected! Fetching running job (%s, %d) from cc-backend to cache.", ccJob.Cluster, ccJob.JobID)
+			}
+
+			slurmJob, err := SlurmQueryJob(ccJob.Cluster, uint32(ccJob.JobID))
+			if err != nil {
+				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", ccJob.Cluster, ccJob.JobID, err)
+				continue
+			}
+
+			ccJobCache[ccJob.Cluster][ccJob.JobID] = &CacheJobState{
+				Running: true,
+			}
+
+			err = ccSyncJob(*slurmJob)
+			if err != nil {
+				trace.Error("Unable to correct desync (state may be inconsistent now!). Sync to cc-backend failed: %v", err)
+			}
+		}
+	}
+
+	// ... and now new cc-backend state <-- out old cc-backend state
+	for cluster, ccJobClusterCache := range ccJobCache {
+		for jobId, cacheJob := range ccJobClusterCache {
+			ccJob, ok := ccJobState[cluster][jobId]
+			if !ok && !cacheJob.Running {
+				// If our local job state is not set to 'running' anymore, it's okay if cc-backend doesn't know this job.
+				ok = true
+			}
+
+			if ok {
+				continue
+			}
+
+			if !initial {
+				trace.Warn("Cache desync detected! Resetting missing/stopped job (%s, %d) from cc-backend in cache.", ccJob.Cluster, ccJob.JobID)
+			}
+
+			slurmJob, err := SlurmQueryJob(ccJob.Cluster, uint32(ccJob.JobID))
+			if err != nil {
+				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", ccJob.Cluster, ccJob.JobID, err)
+				continue
+			}
+
+			cacheJob.CacheEvictAge = 0
+			cacheJob.Running = false
+
+			err = ccSyncJob(*slurmJob)
+			if err != nil {
+				trace.Error("Unable to correct desync (state may be inconsistent now!). Sync to cc-backend failed: %v", err)
+			}
+		}
+	}
+
+	ccJobCacheDate = time.Now()
+	ccJobCacheValid = true
+
+	trace.Info("CC Job Cache updated. Number of running jobs: %d", ccJobCount)
 	return nil
 }
 
 func ccCacheGC() {
-	for _, cachedJobStates := range ccJobState {
+	for _, cachedJobStates := range ccJobCache {
 		for jobId, cachedJobState := range cachedJobStates {
 			if cachedJobState.Running {
 				cachedJobState.CacheEvictAge = 0
@@ -511,7 +578,7 @@ func processSlurmSqueuePoll() {
 		// Check if there are any stale jobs in cc-backend, which are no longer known to Slurm.
 		// This should usually not happen, but in the past Slurm would occasionally lie to use and we would miss
 		// job stops.
-		for jobId, cachedJobState := range ccJobState[cluster] {
+		for jobId, cachedJobState := range ccJobCache[cluster] {
 			if !cachedJobState.Running {
 				continue
 			}
@@ -614,7 +681,7 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 	cluster := *job.Cluster
 	jobId := int64(*job.JobId)
 
-	_, jobKnown := ccJobState[cluster][jobId]
+	_, jobKnown := ccJobCache[cluster][jobId]
 	if jobKnown {
 		return nil
 	}
@@ -661,7 +728,7 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 		}
 	}
 
-	ccJobState[*job.Cluster][int64(*job.JobId)] = &CacheJobState{
+	ccJobCache[*job.Cluster][int64(*job.JobId)] = &CacheJobState{
 		Running: true,
 	}
 	return nil
@@ -671,7 +738,7 @@ func ccStopJob(job SacctJob) error {
 	cluster := *job.Cluster
 	jobId := int64(*job.JobId)
 
-	cachedJobState, jobKnown := ccJobState[cluster][jobId]
+	cachedJobState, jobKnown := ccJobCache[cluster][jobId]
 	if jobKnown && !cachedJobState.Running {
 		return nil
 	}
@@ -694,7 +761,7 @@ func ccStopJob(job SacctJob) error {
 	}
 
 	if respStop.StatusCode != 200 && respStop.StatusCode != 422 {
-		return fmt.Errorf("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP %d: Body %s", cluster, jobId, respStop.StatusCode, string(body))
+		return fmt.Errorf("Calling /jobs/stop_job/ (cluster=%s jobid=%d known=%v running=%v) failed with HTTP %d: Body %s", cluster, jobId, jobKnown, cachedJobState.Running, respStop.StatusCode, string(body))
 	}
 
 	if respStop.StatusCode == 422 {
@@ -722,12 +789,12 @@ func ccStopJob(job SacctJob) error {
 		}
 	}
 
-	if _, ok := ccJobState[cluster][jobId]; ok {
-		ccJobState[cluster][jobId].Running = false
+	if jobKnown {
+		cachedJobState.Running = false
 	} else {
 		// I can't imagine that this case occurs in practice, but who knows...
 		trace.Warn("Stopping a job (%s, %d), which is known by cc-backend but not in our cache. Did we miss a job start event?", cluster, jobId)
-		ccJobState[cluster][jobId] = &CacheJobState{
+		ccJobCache[cluster][jobId] = &CacheJobState{
 			Running: false,
 		}
 	}
@@ -868,7 +935,8 @@ func checkIgnoreJob(job SacctJob, startJobData *StartJob) bool {
 	trace.Debug("Checking whether job %d should be ignored", *job.JobId)
 
 	if len(startJobData.Resources) == 0 {
-		trace.Info("Ignoring job %d, which has no resources associated. This job was probably never scheduled.", *job.JobId)
+		// This should only happen for jobs, which are immediately cancelled or jobs, which are still pending.
+		trace.Debug("Ignoring job %d, which has no resources associated. This job was probably never scheduled (state=%s).", *job.JobId, string(*job.State.Current))
 		return true
 	}
 
