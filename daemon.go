@@ -36,18 +36,26 @@ type StopJob struct {
 	StopTime int64           `json:"stopTime"  db:"stop_time"`
 }
 
+type CacheJobState struct {
+	CacheEvictAge int
+	Running       bool
+}
+
+const CACHE_EVICT_COUNT int = 5
+
 var (
 	ipcSocket  net.Listener
 	httpClient http.Client
 	natsConn   *nats.Conn
 	jobEvents  []PrologEpilogSlurmctldEnv
 	hostname   string
-	// map['clusterName'] -> set of Slurm Job IDs, which are currently running.
-	// When a jobs is started, they are inserted into the map as 'true'. Then they are stopped
-	// they are set as 'false'. Only then ccCacheGC runs, they are actually removed.
-	// That way, if job is quickly started and stopped via PrEp event, we still know the job,
-	// and don't send out a (thus failing) start_job event.
-	ccJobState      map[string]map[int64]bool
+	// map['clusterName'] -> map[slurmId] -> CC Job State, which are currently running (or ran recently).
+	// When a jobs is started, they are inserted into the map. When they are stopped
+	// they are set as not running. They are eventually removed again (to avoid leaking memory),
+	// but only after CachEvictCountdown as gone down to zero. We do not remove the immediately
+	// to avoid the situation where e.g. a poll event stops a job, and the corresponding PrEp stop event
+	// won't find the job in the cache anymore. In that case, a stop_job would be sent, even the stop would already have stopped.
+	ccJobState      map[string]map[int64]*CacheJobState
 	ccJobStateValid bool
 	ccJobStateDate  time.Time
 	slurmClusters   []string
@@ -313,11 +321,11 @@ func ccCacheUpdate() error {
 	}
 
 	/* clear cache */
-	ccJobStateNew := make(map[string]map[int64]bool)
+	ccJobStateNew := make(map[string]map[int64]*CacheJobState)
 
 	/* Create the new cache for all the clusters that we managed. */
 	for _, cluster := range slurmClusters {
-		ccJobStateNew[cluster] = make(map[int64]bool)
+		ccJobStateNew[cluster] = make(map[int64]*CacheJobState)
 	}
 
 	/* ... and refill it */
@@ -339,7 +347,9 @@ func ccCacheUpdate() error {
 			continue
 		}
 
-		ccJobStateNew[job.BaseJob.Cluster][job.BaseJob.JobID] = true
+		ccJobStateNew[job.BaseJob.Cluster][job.BaseJob.JobID] = &CacheJobState{
+			Running: true,
+		}
 		jobCount++
 	}
 
@@ -352,10 +362,16 @@ func ccCacheUpdate() error {
 }
 
 func ccCacheGC() {
-	for _, jobIds := range ccJobState {
-		for jobId, running := range jobIds {
-			if !running {
-				delete(jobIds, jobId)
+	for _, cachedJobStates := range ccJobState {
+		for jobId, cachedJobState := range cachedJobStates {
+			if cachedJobState.Running {
+				cachedJobState.CacheEvictAge = 0
+				continue
+			}
+
+			cachedJobState.CacheEvictAge += 1
+			if cachedJobState.CacheEvictAge > CACHE_EVICT_COUNT {
+				delete(cachedJobStates, jobId)
 			}
 		}
 	}
@@ -495,8 +511,8 @@ func processSlurmSqueuePoll() {
 		// Check if there are any stale jobs in cc-backend, which are no longer known to Slurm.
 		// This should usually not happen, but in the past Slurm would occasionally lie to use and we would miss
 		// job stops.
-		for jobId, running := range ccJobState[cluster] {
-			if !running {
+		for jobId, cachedJobState := range ccJobState[cluster] {
+			if !cachedJobState.Running {
 				continue
 			}
 
@@ -583,8 +599,6 @@ func ccSyncJob(job SacctJob) error {
 	// TODO If the job already exists in cc-backend, make sure to update values if interested, which may have changed.
 	// In the future, this could be used to implement updating of job time limits, etc.
 	// At the moment, we can't do this yet, because cc-backend doesn't have an API endpoint to alter an existing job.
-	// We also need to store the addition job information, which we fetch from cc-backend.
-	// ccJobState currently only contains the job ID, while all other information from the jobs is discarded.
 
 	/* Only submit stop job, if it has actually finished */
 	if job.Time.End.Number <= 0 {
@@ -597,7 +611,10 @@ func ccSyncJob(job SacctJob) error {
 }
 
 func ccStartJob(job SacctJob, startJobData *StartJob) error {
-	_, jobKnown := ccJobState[*job.Cluster][int64(*job.JobId)]
+	cluster := *job.Cluster
+	jobId := int64(*job.JobId)
+
+	_, jobKnown := ccJobState[cluster][jobId]
 	if jobKnown {
 		return nil
 	}
@@ -620,13 +637,13 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 
 	if respStart.StatusCode != 201 && respStart.StatusCode != 422 {
 		// If the POST is not successful raise an error.
-		return fmt.Errorf("Calling /jobs/start_job/ (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStart.StatusCode, string(body))
+		return fmt.Errorf("Calling /jobs/start_job/ (%s, %d) failed with HTTP %d: Body %s", cluster, jobId, respStart.StatusCode, string(body))
 	}
 
 	// Status Code 201 -> the job was newly created
 	// Status Code 422 -> the job already existed
 	if respStart.StatusCode == 201 {
-		trace.Debug("Sending start_job to NATS for job %d", job.JobId)
+		trace.Debug("Sending start_job to NATS for (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": hostname,
 			"type":     "node",
@@ -635,22 +652,27 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 		}
 		msg, err := ccmessage.NewEvent("job", tags, nil, string(startJobDataJSON), time.Unix(startJobData.StartTime, 0))
 		if err != nil {
-			trace.Warn("ccmessage.NewEvent() failed for job %d failed: %s", *job.JobId, err)
+			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
 			err = natsConn.Publish(Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
 			if err != nil {
-				trace.Warn("Unable to publish message on NATS for job %d: %s", *job.JobId, err)
+				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}
 		}
 	}
 
-	ccJobState[*job.Cluster][int64(*job.JobId)] = true
+	ccJobState[*job.Cluster][int64(*job.JobId)] = &CacheJobState{
+		Running: true,
+	}
 	return nil
 }
 
 func ccStopJob(job SacctJob) error {
-	jobRunning, jobKnown := ccJobState[*job.Cluster][int64(*job.JobId)]
-	if jobKnown && !jobRunning {
+	cluster := *job.Cluster
+	jobId := int64(*job.JobId)
+
+	cachedJobState, jobKnown := ccJobState[cluster][jobId]
+	if jobKnown && !cachedJobState.Running {
 		return nil
 	}
 
@@ -672,17 +694,17 @@ func ccStopJob(job SacctJob) error {
 	}
 
 	if respStop.StatusCode != 200 && respStop.StatusCode != 422 {
-		return fmt.Errorf("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP %d: Body %s", *job.Cluster, *job.JobId, respStop.StatusCode, string(body))
+		return fmt.Errorf("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP %d: Body %s", cluster, jobId, respStop.StatusCode, string(body))
 	}
 
 	if respStop.StatusCode == 422 {
 		/* While it should usually not occur a 422 (i.e. job was already stopped),
 		 * this may still occur if something in the state was glitched. */
-		trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", *job.Cluster, *job.JobId, string(body))
+		trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", cluster, jobId, string(body))
 	}
 
 	if respStop.StatusCode == 200 {
-		trace.Debug("Sending stop_job to NATS for job %d", job.JobId)
+		trace.Debug("Sending stop_job to NATS for job (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": hostname,
 			"type":     "node",
@@ -691,16 +713,24 @@ func ccStopJob(job SacctJob) error {
 		}
 		msg, err := ccmessage.NewEvent("job", tags, nil, string(stopJobDataJSON), time.Unix(stopJobData.StopTime, 0))
 		if err != nil {
-			trace.Warn("ccmessage.NewEvent() failed for job %d failed: %s", *job.JobId, err)
+			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
 			err = natsConn.Publish(Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
 			if err != nil {
-				trace.Warn("Unable to publish message on NATS for job %d: %s", *job.JobId, err)
+				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}
 		}
 	}
 
-	ccJobState[*job.Cluster][int64(*job.JobId)] = false
+	if _, ok := ccJobState[cluster][jobId]; ok {
+		ccJobState[cluster][jobId].Running = false
+	} else {
+		// I can't imagine that this case occurs in practice, but who knows...
+		trace.Warn("Stopping a job (%s, %d), which is known by cc-backend but not in our cache. Did we miss a job start event?", cluster, jobId)
+		ccJobState[cluster][jobId] = &CacheJobState{
+			Running: false,
+		}
+	}
 	return nil
 }
 
