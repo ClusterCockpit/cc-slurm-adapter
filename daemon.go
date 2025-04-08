@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -285,15 +286,39 @@ func daemonInit() error {
 	}
 	trace.Debug("Detected Slurm clusters: %v", slurmClusters)
 
+	printWelcome()
+
 	/* Init cc job state cache */
 	trace.Debug("Fetching initial job state from cc-backend")
 	err = ccCacheUpdate()
 	if err != nil {
 		return fmt.Errorf("Failed to update cc-backend job cache: %w", err)
 	}
-
-	trace.Debug("Initialization complete")
 	return nil
+}
+
+func printWelcome() {
+	trace.Info("Initialization complete")
+	rev := ""
+	modified := false
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				rev = setting.Value
+			} else if setting.Key == "vcs.modified" {
+				if strings.ToLower(setting.Value) == "true" {
+					modified = true
+				}
+			}
+		}
+	}
+	if rev == "" {
+		rev = "(unknown revision)"
+	}
+	if modified && rev != "" {
+		rev += "-dirty"
+	}
+	trace.Info("Running cc-slurm-adapter %s", rev)
 }
 
 func ccCacheUpdate() error {
