@@ -38,6 +38,7 @@ type StopJob struct {
 
 type CacheJobState struct {
 	CacheEvictAge int
+	Stale         bool
 	Running       bool
 }
 
@@ -570,16 +571,8 @@ func processSlurmSqueuePoll() {
 
 		slurmIsJobRunning := make(map[int64]bool)
 		for _, scJob := range jobs {
-			saJob, err := SlurmQueryJob(*scJob.Cluster, *scJob.JobId)
-			if err != nil {
-				trace.Error("Unable to query Slurm (is Slurm available?): %v", err)
-				return
-			}
-
-			err = ccSyncJob(*saJob)
-			if err != nil {
-				trace.Error("Syncing job to ClusterCockpit failed (%v). Trying later...", err)
-				return
+			if strings.ToLower(string(*scJob.JobState)) != "running" {
+				continue
 			}
 
 			slurmIsJobRunning[int64(*scJob.JobId)] = true
@@ -593,18 +586,29 @@ func processSlurmSqueuePoll() {
 				continue
 			}
 
-			if !slurmIsJobRunning[jobId] {
-				trace.Warn("Detected stale job in cc-backend (%s, %d). Trying to synchronize...", cluster, jobId)
-				job, err := SlurmQueryJob(cluster, uint32(jobId))
-				if err != nil {
-					trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
-					continue
-				}
+			if slurmIsJobRunning[jobId] {
+				continue
+			}
 
-				err = ccSyncJob(*job)
-				if err != nil {
-					trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
-				}
+			if !cachedJobState.Stale {
+				// Do not immediately report a job as stale. Give it chance for one more iteration to be cleaned up via poll.
+				// Otherwise a job, which has stopped since the last poll, will immediately be reported as stale.
+				cachedJobState.Stale = true
+				continue
+			}
+
+			trace.Warn("Detected stale job in cc-backend (%s, %d). Trying to synchronize...", cluster, jobId)
+			job, err := SlurmQueryJob(cluster, uint32(jobId))
+			if err != nil {
+				trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
+				continue
+			}
+
+			trace.Warn("Stale job state is: %s", string(*job.State.Current))
+
+			err = ccSyncJob(*job)
+			if err != nil {
+				trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
 			}
 		}
 	}
@@ -684,7 +688,13 @@ func ccSyncJob(job SacctJob) error {
 		return nil
 	}
 
-	return ccStopJob(job)
+	err = ccStopJob(job)
+	if err != nil {
+		return err
+	}
+
+	ccJobCache[*job.Cluster][int64(*job.JobId)].Stale = false
+	return nil
 }
 
 func ccStartJob(job SacctJob, startJobData *StartJob) error {

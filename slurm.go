@@ -342,15 +342,7 @@ func SlurmQueryJobsActive(clusterName string) ([]ScontrolJob, error) {
 	}
 
 	SlurmWarnVersion(result.Meta.Slurm.Version)
-
-	runningJobsOnly := make([]ScontrolJob, 0)
-	for _, job := range result.Jobs {
-		if strings.ToLower(string(*job.JobState)) == "running" {
-			runningJobsOnly = append(runningJobsOnly, job)
-		}
-	}
-
-	return runningJobsOnly, nil
+	return result.Jobs, nil
 }
 
 func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
