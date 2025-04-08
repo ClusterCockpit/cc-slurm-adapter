@@ -62,6 +62,7 @@ type ScontrolJob struct {
 	/* Only (our) required fields are listed here. */
 	JobId        *uint32               `json:"job_id"`
 	JobResources *ScontrolJobResources `json:"job_resources"`
+	JobState     *SlurmString          `json:"job_state"`
 	Comment      *string               `json:"comment"`
 	Cluster      *string               `json:"cluster"`
 	GresDetail   []string              `json:"gres_detail"`
@@ -341,7 +342,15 @@ func SlurmQueryJobsActive(clusterName string) ([]ScontrolJob, error) {
 	}
 
 	SlurmWarnVersion(result.Meta.Slurm.Version)
-	return result.Jobs, nil
+
+	runningJobsOnly := make([]ScontrolJob, 0)
+	for _, job := range result.Jobs {
+		if strings.ToLower(string(*job.JobState)) == "running" {
+			runningJobsOnly = append(runningJobsOnly, job)
+		}
+	}
+
+	return runningJobsOnly, nil
 }
 
 func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
