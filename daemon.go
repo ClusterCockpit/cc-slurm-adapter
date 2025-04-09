@@ -697,11 +697,6 @@ func ccSyncJob(job SacctJob) error {
 		return nil
 	}
 
-	if !jobHasResources(&startJobData.BaseJob) {
-		// This should only happen if we resynchronize a job, after is has already stopped for some time.
-		trace.Warn("Unable to get resources for job (%s, %d), continuing without hwthread/accelerator information.", *job.Cluster, *job.JobId)
-	}
-
 	err = ccStartJob(job, startJobData)
 	if err != nil {
 		return err
@@ -734,6 +729,11 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 	_, jobKnown := ccJobCache[cluster][jobId]
 	if jobKnown {
 		return nil
+	}
+
+	if !jobHasResources(&startJobData.BaseJob) {
+		// This should only happen if we resynchronize a job, after is has already stopped for some time.
+		trace.Warn("Unable to get resources for job (%s, %d), continuing without hwthread/accelerator information.", *job.Cluster, *job.JobId)
 	}
 
 	startJobDataJSON, err := json.Marshal(startJobData)
