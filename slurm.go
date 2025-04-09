@@ -241,15 +241,22 @@ func SlurmGetClusterNames() ([]string, error) {
 		return nil, fmt.Errorf("Unable to obtain cluster names. Bad sinfo output: %s", stdoutAllClusters)
 	}
 
-	clusterNames := make([]string, 0)
-	for _, stdout := range stdoutByCluster {
-		var result SinfoResult
-		err = json.Unmarshal([]byte(stdout), &result)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
+	if len(stdoutByCluster) == 1 {
+		// This is a bit confusing: If there is only 1 cluster, we have to obtain information via the JSON meta field
+		// Otherwise, we can use the CLUSTER prefix values extracted from stdout.
+		for _, stdout := range stdoutByCluster {
+			var result SinfoResult
+			err = json.Unmarshal([]byte(stdout), &result)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
+			}
+			return []string{result.Meta.Slurm.Cluster}, nil
 		}
+	}
 
-		clusterNames = append(clusterNames, result.Meta.Slurm.Cluster)
+	clusterNames := make([]string, 0)
+	for clusterName, _ := range stdoutByCluster {
+		clusterNames = append(clusterNames, clusterName)
 	}
 
 	return clusterNames, nil
