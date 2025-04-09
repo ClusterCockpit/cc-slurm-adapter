@@ -276,6 +276,8 @@ func SlurmQueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 		return sacctCache[clusterName][jobId], nil
 	}
 
+	// Performance info: This can be fairly expensive, hence why we have some sort of caching.
+	// You may be able to do ~5 sacct calls per second.
 	stdout, err := callProcess("sacct", "--cluster", clusterName, "-j", fmt.Sprintf("%d", jobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacct -j %d: %w", jobId, err)
@@ -346,6 +348,8 @@ func SlurmQueryJobsActive(clusterName string) ([]ScontrolJob, error) {
 }
 
 func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
+	// Performance info: This scontrol is usually fairly quickly, since this doesn't query the slurmdbd.
+	// In my tests it was around 100 executions per second.
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId), "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run scontrol show job %d: %w (%s)", *job.JobId, err, stdout)
