@@ -406,7 +406,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		return resources, nil
 	}
 
-	if scJob.JobResources == nil {
+	if scJob.JobResources == nil || scJob.JobResources.Nodes == nil {
 		/* If Resources is nil, then the job probably just hasn't started yet.
 		 * we can safely return an empty list, since this job will be discarded
 		 * later either way. */
