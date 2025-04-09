@@ -156,9 +156,14 @@ type SacctmgrUser struct {
 	Name               string   `json:"name"`
 }
 
+type SacctmgrCluster struct {
+	Name *string `json:"name"`
+}
+
 type SacctmgrResult struct {
-	Users []SacctmgrUser `json:"users"`
-	Meta  SlurmMeta      `json:"meta"`
+	Clusters []SacctmgrCluster `json:"clusters"`
+	Users    []SacctmgrUser    `json:"users"`
+	Meta     SlurmMeta         `json:"meta"`
 }
 
 type SinfoResult struct {
@@ -231,32 +236,24 @@ func (v *SlurmString) UnmarshalJSON(data []byte) error {
 }
 
 func SlurmGetClusterNames() ([]string, error) {
-	stdoutAllClusters, err := callProcess("sinfo", "--all", "--json")
+	stdout, err := callProcess("sacctmgr", "list", "clusters", "--noheader", "--json")
 	if err != nil {
-		return nil, fmt.Errorf("Unable to run sinfo to obtain cluster names: %w", err)
+		return nil, fmt.Errorf("Unable to run sacctmgr to obtain cluster names: %w", err)
 	}
 
-	stdoutByCluster := SlurmGetOutputForClusters(stdoutAllClusters)
-	if len(stdoutByCluster) == 0 {
-		return nil, fmt.Errorf("Unable to obtain cluster names. Bad sinfo output: %s", stdoutAllClusters)
-	}
-
-	if len(stdoutByCluster) == 1 {
-		// This is a bit confusing: If there is only 1 cluster, we have to obtain information via the JSON meta field
-		// Otherwise, we can use the CLUSTER prefix values extracted from stdout.
-		for _, stdout := range stdoutByCluster {
-			var result SinfoResult
-			err = json.Unmarshal([]byte(stdout), &result)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
-			}
-			return []string{result.Meta.Slurm.Cluster}, nil
-		}
+	var result SacctmgrResult
+	err = json.Unmarshal([]byte(stdout), &result)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to parse sacctmgr output: %w", err)
 	}
 
 	clusterNames := make([]string, 0)
-	for clusterName, _ := range stdoutByCluster {
-		clusterNames = append(clusterNames, clusterName)
+	for _, clusterObj := range result.Clusters {
+		clusterNames = append(clusterNames, *clusterObj.Name)
+	}
+
+	if len(clusterNames) == 0 {
+		return nil, fmt.Errorf("Unable to determine cluster names. sacctmgr returned no clusters. Is this Slurm version compatible?")
 	}
 
 	return clusterNames, nil
@@ -336,13 +333,12 @@ func SlurmQueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJ
 }
 
 func SlurmQueryJobsActive(clusterName string) ([]ScontrolJob, error) {
-	stdout, err := callProcess("squeue", "--cluster", clusterName, "--all", "--json")
+	// Caution: it is important to use --noheader here.
+	// For multi cluster systems squeue will otherwise print non-JSON header lines.
+	stdout, err := callProcess("squeue", "--noheader", "--cluster", clusterName, "--all", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run squeue: %w", err)
 	}
-
-	// squeue requires stripping the cluster header in multi cluster configs
-	stdout = SlurmRemoveClusterPrefix(stdout)
 
 	var result ScontrolResult // scontrol and squeue appear to use the same scheme
 	err = json.Unmarshal([]byte(stdout), &result)
@@ -508,58 +504,6 @@ func SlurmGetJobInfoText(job SacctJob) string {
 	}
 
 	return strings.TrimSpace(stdout)
-}
-
-func SlurmGetOutputForClusters(stdout string) map[string]string {
-	// I don't know who at SchedMD came up with this, but it's incredibly silly:
-	// Even when in --json output mode, the Slurm commands will output
-	// non-JSON header lines before the actual JSON:
-	// CLUSTER: myclustername
-	// {
-	//   "foobar" : .....
-	// }
-	//
-	// CLUSTER: myotherclustername
-	// {
-	//   "foobar" : .....
-	// }
-	// when multiple clusters are being managed.
-	// This function strips these headers away, and returns the individual blocks
-	// as list.
-
-	// If the first line doesn't start with the Cluster Name, this scheme is not used.
-	// In that case, the string is simply a returned as single block without changes.
-	r := regexp.MustCompile("(?m)^CLUSTER: (\\w+)$")
-	allMatchPositions := r.FindAllStringSubmatchIndex(stdout, -1)
-	if allMatchPositions == nil {
-		return map[string]string{"": stdout}
-	}
-
-	result := make(map[string]string)
-	for i, matchPositions := range allMatchPositions {
-		clusterNameBeg := matchPositions[2]
-		clusterNameEnd := matchPositions[3]
-		clusterName := stdout[clusterNameBeg:clusterNameEnd]
-		// A block isn't matched directly, but it starts at the end of the current
-		// match and ends at the beginning of next match. If there is no next match,
-		// it ends at the end of the entire stdout string.
-		blockBeg := matchPositions[1]
-		blockEnd := len(stdout)
-		if i+1 < len(allMatchPositions) {
-			blockEnd = allMatchPositions[i+1][0]
-		}
-		result[clusterName] = stdout[blockBeg:blockEnd]
-	}
-	return result
-}
-
-func SlurmRemoveClusterPrefix(stdout string) string {
-	r := regexp.MustCompile("(?m)^CLUSTER: \\w+$")
-	matchPositions := r.FindStringSubmatchIndex(stdout)
-	if matchPositions == nil {
-		return stdout
-	}
-	return stdout[matchPositions[1]:len(stdout)]
 }
 
 func SlurmGetJobScript(job SacctJob) string {
