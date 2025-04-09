@@ -395,8 +395,6 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		/* If no jobs are returned, this is most likely because the job has already ended some time ago.
 		 * There is nothing we can do about this, so try to obtain hostnames
 		 * and continue without hwthread information. */
-		trace.Warn("Unable to get resources for job %d, continuing without hwthread information.", *saJob.JobId)
-
 		nodes, err := SlurmGetNodes(saJob)
 		if err != nil {
 			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", *saJob.JobId, err)
