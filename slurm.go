@@ -529,7 +529,7 @@ func SlurmGetOutputForClusters(stdout string) map[string]string {
 
 	// If the first line doesn't start with the Cluster Name, this scheme is not used.
 	// In that case, the string is simply a returned as single block without changes.
-	r := regexp.MustCompile("(?m)^CLUSTER: \\w+$")
+	r := regexp.MustCompile("(?m)^CLUSTER: (\\w+)$")
 	allMatchPositions := r.FindAllStringSubmatchIndex(stdout, -1)
 	if allMatchPositions == nil {
 		return map[string]string{"": stdout}
