@@ -731,11 +731,6 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 		return nil
 	}
 
-	if !jobHasResources(&startJobData.BaseJob) {
-		// This should only happen if we resynchronize a job, after is has already stopped for some time.
-		trace.Warn("Unable to get resources for job (%s, %d), continuing without hwthread/accelerator information.", *job.Cluster, *job.JobId)
-	}
-
 	startJobDataJSON, err := json.Marshal(startJobData)
 	if err != nil {
 		return fmt.Errorf("Unable to convert StartJob to JSON: %w", err)
@@ -775,6 +770,11 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 			if err != nil {
 				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}
+		}
+
+		if !jobHasResources(&startJobData.BaseJob) {
+			// This should only happen if we resynchronize a job, after is has already stopped for some time.
+			trace.Warn("Unable to obtain Job (%s, %d) with hwthread/accelerator information. Some metrics may be missing in ClusterCockpit.", *job.Cluster, *job.JobId)
 		}
 	}
 
