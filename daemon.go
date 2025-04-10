@@ -427,7 +427,7 @@ func ccCacheUpdate() error {
 	// ... and now new cc-backend state <-- out old cc-backend state
 	for cluster, ccJobClusterCache := range ccJobCache {
 		for jobId, cacheJob := range ccJobClusterCache {
-			ccJob, ok := ccJobState[cluster][jobId]
+			_, ok := ccJobState[cluster][jobId]
 			if !ok && !cacheJob.Running {
 				// If our local job state is not set to 'running' anymore, it's okay if cc-backend doesn't know this job.
 				ok = true
@@ -438,12 +438,12 @@ func ccCacheUpdate() error {
 			}
 
 			if !initial {
-				trace.Warn("Cache desync detected! Resetting missing/stopped job (%s, %d) from cc-backend in cache.", ccJob.Cluster, ccJob.JobID)
+				trace.Warn("Cache desync detected! Resetting missing/stopped job (%s, %d) from cc-backend in cache.", cluster, jobId)
 			}
 
-			slurmJob, err := SlurmQueryJob(ccJob.Cluster, uint32(ccJob.JobID))
+			slurmJob, err := SlurmQueryJob(cluster, uint32(jobId))
 			if err != nil {
-				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", ccJob.Cluster, ccJob.JobID, err)
+				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", cluster, jobId, err)
 				continue
 			}
 
