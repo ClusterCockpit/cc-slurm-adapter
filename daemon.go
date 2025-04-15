@@ -635,8 +635,6 @@ func processSlurmSqueuePoll() {
 			if err != nil {
 				trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
 			}
-
-			cachedJobState.Stale = false
 		}
 	}
 }
