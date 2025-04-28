@@ -533,7 +533,7 @@ func jobEventsProcess() {
 
 		err = ccSyncJob(*job)
 		if err != nil {
-			trace.Warn("Syncing job (%s, %d) via PrEp hook failed. Trying later during regular poll...", jobEventCluster, jobEventId)
+			trace.Warn("Syncing job (%s, %d) via PrEp hook failed (we will try again later during regular poll): %v", jobEventCluster, jobEventId, err)
 		}
 	}
 
