@@ -501,6 +501,11 @@ func SlurmGetJobInfoText(job SacctJob) string {
 		return fmt.Sprintf("Error while getting job information for JobID=%d", *job.JobId)
 	}
 
+	arrayJobGapIndex := strings.Index(stdout, "\n\n")
+	if arrayJobGapIndex != -1 {
+		stdout = stdout[0 : arrayJobGapIndex+1]
+	}
+
 	return strings.TrimSpace(stdout)
 }
 
