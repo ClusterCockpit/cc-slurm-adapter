@@ -1,11 +1,11 @@
 module github.com/ClusterCockpit/cc-slurm-adapter
 
-go 1.23.4
+go 1.23.5
 
-toolchain go1.23.6
+toolchain go1.24.2
 
 require (
-	github.com/ClusterCockpit/cc-backend v1.4.2
+	github.com/ClusterCockpit/cc-backend v1.4.4
 	github.com/ClusterCockpit/cc-lib v0.2.0
 	github.com/nats-io/nats.go v1.41.2
 )

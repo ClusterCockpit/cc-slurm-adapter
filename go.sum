@@ -1,5 +1,5 @@
-github.com/ClusterCockpit/cc-backend v1.4.2 h1:kTOzqkh9N0564N9nqQThnSs7TAfg8RLgvSm00e5HtIc=
-github.com/ClusterCockpit/cc-backend v1.4.2/go.mod h1:g8TNHXe4AXej26snu2//jO3mUF980elT93iV/k11O/c=
+github.com/ClusterCockpit/cc-backend v1.4.4 h1:Xk87C/2dXRWlQOc7RARtfdiukDAZj+8+k0zFO4AFcvc=
+github.com/ClusterCockpit/cc-backend v1.4.4/go.mod h1:F8O4xSsXk+Ys5XoyQAGQ8noLUGneqNsw7QcClNaa5uo=
 github.com/ClusterCockpit/cc-lib v0.2.0 h1:4mEpppqWXkjS3PCHYSOxF3NisrKsbPjg17ftsFhEKPk=
 github.com/ClusterCockpit/cc-lib v0.2.0/go.mod h1:S6oZNtejBHu+ewmGRKYFqJmlrRReXv8J4D2UP8hmu50=
 github.com/RaveNoX/go-jsoncommentstrip v1.0.0/go.mod h1:78ihd09MekBnJnxpICcwzCMzGrKSKYe4AqU6PDYYpjk=
