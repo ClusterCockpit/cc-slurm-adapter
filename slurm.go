@@ -399,6 +399,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		if err != nil {
 			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", *saJob.JobId, err)
 		}
+		trace.Debug("Job (%s, %d) has already ended. Hostnames are the only available resource.", *saJob.Cluster, *saJob.JobId)
 		resources := make([]*schema.Resource, len(nodes))
 		for i, v := range nodes {
 			resources[i] = &schema.Resource{Hostname: v}
@@ -410,6 +411,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		/* If Resources is nil, then the job probably just hasn't started yet.
 		 * we can safely return an empty list, since this job will be discarded
 		 * later either way. */
+		trace.Debug("Job (%s, %d) has scontrol info available, but no resources", *saJob.Cluster, *saJob.JobId)
 		return make([]*schema.Resource, 0), nil
 	}
 

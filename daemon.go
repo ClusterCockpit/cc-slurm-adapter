@@ -417,7 +417,7 @@ func ccCacheUpdate() error {
 				Running: true,
 			}
 
-			err = ccSyncJob(*slurmJob)
+			err = ccSyncJob(*slurmJob, true)
 			if err != nil {
 				trace.Error("Unable to correct desync (state may be inconsistent now!). Sync to cc-backend failed: %v", err)
 			}
@@ -450,7 +450,7 @@ func ccCacheUpdate() error {
 			cacheJob.CacheEvictAge = 0
 			cacheJob.Running = false
 
-			err = ccSyncJob(*slurmJob)
+			err = ccSyncJob(*slurmJob, true)
 			if err != nil {
 				trace.Error("Unable to correct desync (state may be inconsistent now!). Sync to cc-backend failed: %v", err)
 			}
@@ -531,7 +531,7 @@ func jobEventsProcess() {
 			}
 		}
 
-		err = ccSyncJob(*job)
+		err = ccSyncJob(*job, false)
 		if err != nil {
 			trace.Warn("Syncing job (%s, %d) via PrEp hook failed (we will try again later during regular poll): %v", jobEventCluster, jobEventId, err)
 		}
@@ -571,7 +571,7 @@ func processSlurmSacctPoll() {
 		}
 
 		for _, job := range jobs {
-			err = ccSyncJob(job)
+			err = ccSyncJob(job, false)
 			if err != nil {
 				trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 				return
@@ -631,7 +631,7 @@ func processSlurmSqueuePoll() {
 
 			trace.Warn("Stale job state is: %s", string(*job.State.Current))
 
-			err = ccSyncJob(*job)
+			err = ccSyncJob(*job, false)
 			if err != nil {
 				trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
 			}
@@ -681,7 +681,7 @@ func lastRunSet(timeStamp time.Time) {
 	}
 }
 
-func ccSyncJob(job SacctJob) error {
+func ccSyncJob(job SacctJob, force bool) error {
 	/* Assert the job exists in cc-backend. Ignore if the job already exists. */
 	if Config.CcRestUrl == "" {
 		trace.Info("Skipping submission to ClusterCockpit REST. Missing URL. This feature is optional, so we will continue running")
@@ -693,7 +693,7 @@ func ccSyncJob(job SacctJob) error {
 		return err
 	}
 
-	if checkIgnoreJob(job, startJobData) {
+	if !force && checkIgnoreJob(job, startJobData) {
 		return nil
 	}
 
