@@ -166,8 +166,25 @@ type SacctmgrResult struct {
 	Meta     SlurmMeta         `json:"meta"`
 }
 
+type SinfoPartialNode struct {
+	State []string `json:"state"`
+}
+
+type SinfoPartialNodes struct {
+	Allocated *int     `json:"allocated"`
+	Idle      *int     `json:"idle"`
+	Total     *int     `json:"total"`
+	Nodes     []string `json:"nodes"`
+}
+
+type SinfoPartial struct {
+	Node  *SinfoPartialNode  `json:"node"`
+	Nodes *SinfoPartialNodes `json:"nodes"`
+}
+
 type SinfoResult struct {
-	Meta SlurmMeta `json:"meta"`
+	Sinfo []SinfoPartial `json:"sinfo"`
+	Meta  *SlurmMeta     `json:"meta"`
 }
 
 const (
@@ -575,6 +592,23 @@ func SlurmCheckPerms() {
 	}
 
 	trace.Warn("sacctmgr reported that our user '%s' is not a Slurm operator. If Slurm uses relaxed permissions, this is not a problem. However, if not, NO JOBS WILL BE REPORTED! Run 'sacctmgr add user %s Account=root AdminLevel=operator'", username, username)
+}
+
+func SlurmGetClusterStats(cluster string) ([]SinfoPartial, error) {
+	trace.Debug("SlurmGetClusterStats()")
+
+	stdout, err := callProcess("sinfo", "--cluster", cluster, "--noheader", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("sinfo on cluster '%s' failed: %w", cluster, err)
+	}
+
+	var result SinfoResult
+	err = json.Unmarshal([]byte(stdout), &result)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to parse sinfo JSON: %w", err)
+	}
+
+	return result.Sinfo, nil
 }
 
 func rangeStringToInts(rangeString string) []int {

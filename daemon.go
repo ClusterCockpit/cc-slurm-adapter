@@ -154,6 +154,11 @@ func DaemonMain() error {
 				trace.Error("Unable to update cc-backend cache. Trying later...")
 				break
 			}
+			err = ccSyncStats()
+			if err != nil {
+				trace.Error("Unable to sync stats to cc-backend. Trying later...")
+				break
+			}
 			processSlurmSacctPoll()
 			processSlurmSqueuePoll()
 			ccCacheGC()
@@ -848,6 +853,66 @@ func ccStopJob(job SacctJob) error {
 			Running: false,
 		}
 	}
+	return nil
+}
+
+func ccSyncStats() error {
+	//slurmStateToCCSate := make(map[string]string)
+
+	for _, cluster := range slurmClusters {
+		stats, err := SlurmGetClusterStats(cluster)
+		if err != nil {
+			trace.Error("Unable to sync Slurm stats to cc-backend: %v", err)
+			continue
+		}
+
+		nodeStates := struct {
+			Cluster string `json:"cluster"`
+			// map[hostname]map[state]true
+			State map[string]map[string]bool `json:"state"`
+		}{}
+
+		nodeStates.Cluster = cluster
+		nodeStates.State = make(map[string]map[string]bool)
+
+		for _, stat := range stats {
+			for _, hostname := range stat.Nodes.Nodes {
+				if nodeStates.State[hostname] == nil {
+					nodeStates.State[hostname] = make(map[string]bool)
+				}
+
+				for _, state := range stat.Node.State {
+					nodeStates.State[hostname][state] = true
+				}
+			}
+		}
+
+		nodeStateDataJSON, err := json.Marshal(nodeStates)
+		if err != nil {
+			return fmt.Errorf("Unable to convert NodeState to JSON: %w", err)
+		}
+
+		// TODO remove this continue statement, once we actually want to submit things to CC
+		fmt.Printf("CC STATE SYNC: %v\n", string(nodeStateDataJSON))
+		continue
+
+		respNodeState, err := ccPost("/nodes/update/", nodeStateDataJSON)
+		if err != nil {
+			return err
+		}
+
+		defer respNodeState.Body.Close()
+		body, err := io.ReadAll(respNodeState.Body)
+		if err != nil {
+			return err
+		}
+
+		if respNodeState.StatusCode != 201 {
+			return fmt.Errorf("Calling /nodes/update/ (%s) failed with HTTP: %d: Body: %s", cluster, respNodeState.StatusCode, string(body))
+		}
+	}
+
+	trace.Info("Updated CC node state on clusters %v", slurmClusters)
 	return nil
 }
 
