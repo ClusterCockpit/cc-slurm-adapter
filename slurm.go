@@ -177,14 +177,44 @@ type SinfoPartialNodes struct {
 	Nodes     []string `json:"nodes"`
 }
 
+type SinfoPartialCpus struct {
+	Allocated *int `json:"allocated"`
+	Total     *int `json:"total"`
+}
+
+type SinfoPartialMemory struct {
+	Maximum   *int `json:"maximum"`
+	Allocated *int `json:"allocated"`
+	Free *struct{
+		Minimum SlurmInt `json:"minimum"`
+		Maximum SlurmInt `json:"maximum"`
+	} `json:"free"`
+}
+
+type SinfoPartialGres struct {
+	Total *string `json:"total"`
+	Used  *string `json:"used"`
+}
+
 type SinfoPartial struct {
-	Node  *SinfoPartialNode  `json:"node"`
-	Nodes *SinfoPartialNodes `json:"nodes"`
+	Node   *SinfoPartialNode   `json:"node"`
+	Nodes  *SinfoPartialNodes  `json:"nodes"`
+	Cpus   *SinfoPartialCpus   `json:"cpus"`
+	Memory *SinfoPartialMemory `json:"memory"`
+	Gres   *SinfoPartialGres   `json:"gres"`
 }
 
 type SinfoResult struct {
 	Sinfo []SinfoPartial `json:"sinfo"`
 	Meta  *SlurmMeta     `json:"meta"`
+}
+
+type GRES struct {
+	Variant       string // e.g. "gpu"
+	Id            string // e.g. "h100"
+	Count         int    // e.g. "4"
+	DomainType    string // e.g. "S", "IDX"
+	DomainIndices []int
 }
 
 const (
@@ -453,20 +483,14 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		var accelerators []string
 		if *allocation.Index < len(scJob.GresDetail) {
 			trace.Debug("Detecting GPU via gres")
-			nodeGres := scJob.GresDetail[*allocation.Index]
-			// e.g. "gpu:h100:4(IDX:0-3)" --> "gpu" "h100" "4" "0-3"
-			gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\(IDX:([0-9,\\-]+)\\)$")
-			nodeGresParsed := gresParseRegex.FindStringSubmatch(nodeGres)
-			if len(nodeGresParsed) == 5 && nodeGresParsed[1] == "gpu" {
-				/* Find which accelerator list we have to search, depending on hostname regex */
-				gpuIndices := rangeStringToInts(nodeGresParsed[4])
-
+			nodeGres, err := SlurmParseGRES(scJob.GresDetail[*allocation.Index])
+			if err == nil && nodeGres.Variant == "gpu" {
 				found := false
 				for hostRegex, pciAddrList := range Config.GpuPciAddrs {
 					/* We initially check the regex, so no need to check for errors again. */
 					match, _ := regexp.MatchString(hostRegex, *allocation.Hostname)
 					if match {
-						for _, v := range gpuIndices {
+						for _, v := range nodeGres.DomainIndices {
 							if v >= len(pciAddrList) {
 								trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *saJob.JobId, v, len(Config.GpuPciAddrs))
 								continue
@@ -609,6 +633,28 @@ func SlurmGetClusterStats(cluster string) ([]SinfoPartial, error) {
 	}
 
 	return result.Sinfo, nil
+}
+
+func SlurmParseGRES(gres string) (*GRES, error) {
+	// e.g. "gpu:h100:4(IDX:0-3)" --> "gpu" "h100" "4" "IDX" "0-3"
+	gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\((\\w+):([0-9,\\-]+)\\)$")
+	gresParsed := gresParseRegex.FindStringSubmatch(gres)
+	if len(gresParsed) != 6 {
+		return nil, fmt.Errorf("Unable to parse GRES: '%s'", gres)
+	}
+
+	count, err := strconv.ParseInt(gresParsed[3], 10, 32)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GRES{
+		Variant:       gresParsed[1],
+		Id:            gresParsed[2],
+		Count:         int(count),
+		DomainType:    gresParsed[4],
+		DomainIndices: rangeStringToInts(gresParsed[5]),
+	}, nil
 }
 
 func rangeStringToInts(rangeString string) []int {

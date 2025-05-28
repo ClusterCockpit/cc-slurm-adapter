@@ -866,24 +866,56 @@ func ccSyncStats() error {
 			continue
 		}
 
+		type Node struct {
+			// map[state]true
+			States          map[string]bool `json:"states"`
+			CpusAllocated   int             `json:"cpusAllocated"`
+			CpusTotal       int             `json:"cpusTotal"`
+			MemoryAllocated int             `json:"memoryAllocated"`
+			MemoryTotal     int             `json:"memoryTotal"`
+			GpusAllocated   int             `json:"gpusAllocated"`
+			GpusTotal       int             `json:"gpusTotal"`
+		}
+
 		nodeStates := struct {
-			Cluster string `json:"cluster"`
-			// map[hostname]map[state]true
-			State map[string]map[string]bool `json:"state"`
+			Cluster string          `json:"cluster"`
+			Nodes   map[string]Node `json:"node"`
 		}{}
 
 		nodeStates.Cluster = cluster
-		nodeStates.State = make(map[string]map[string]bool)
+		nodeStates.Nodes = make(map[string]Node)
 
 		for _, stat := range stats {
 			for _, hostname := range stat.Nodes.Nodes {
-				if nodeStates.State[hostname] == nil {
-					nodeStates.State[hostname] = make(map[string]bool)
+				node, ok := nodeStates.Nodes[hostname]
+				if !ok {
+					node = Node{
+						States: make(map[string]bool),
+					}
+				}
+
+				// For some reason the CPU core counts are aggregated over the number of nodes
+				node.CpusAllocated = *stat.Cpus.Allocated / len(stat.Nodes.Nodes)
+				node.CpusTotal = *stat.Cpus.Total / len(stat.Nodes.Nodes)
+				// Memory is not aggragated
+				node.MemoryAllocated = *stat.Memory.Allocated
+				node.MemoryTotal = *stat.Memory.Maximum
+				// Neither is GRES
+				gresTotal, errTotal := SlurmParseGRES(*stat.Gres.Total)
+				gresAlloc, errAlloc := SlurmParseGRES(*stat.Gres.Used)
+				if errTotal == nil && errAlloc == nil {
+					node.GpusTotal = gresTotal.Count
+					node.GpusAllocated = gresAlloc.Count
+				} else {
+					node.GpusTotal = 0
+					node.GpusAllocated = 0
 				}
 
 				for _, state := range stat.Node.State {
-					nodeStates.State[hostname][state] = true
+					node.States[state] = true
 				}
+
+				nodeStates.Nodes[hostname] = node
 			}
 		}
 
