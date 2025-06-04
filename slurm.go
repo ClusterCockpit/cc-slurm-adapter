@@ -185,7 +185,7 @@ type SinfoPartialCpus struct {
 type SinfoPartialMemory struct {
 	Maximum   *int `json:"maximum"`
 	Allocated *int `json:"allocated"`
-	Free *struct{
+	Free      *struct {
 		Minimum SlurmInt `json:"minimum"`
 		Maximum SlurmInt `json:"maximum"`
 	} `json:"free"`
