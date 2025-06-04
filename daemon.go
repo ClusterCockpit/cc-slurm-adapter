@@ -868,6 +868,7 @@ func ccSyncStats() error {
 
 		type Node struct {
 			// map[state]true
+			Hostname        string          `json:"hostname"`
 			States          map[string]bool `json:"states"`
 			CpusAllocated   int             `json:"cpusAllocated"`
 			CpusTotal       int             `json:"cpusTotal"`
@@ -878,22 +879,25 @@ func ccSyncStats() error {
 		}
 
 		nodeStates := struct {
-			Cluster string          `json:"cluster"`
-			Nodes   map[string]Node `json:"node"`
+			Cluster string `json:"cluster"`
+			Nodes   []Node `json:"node"`
 		}{}
 
 		nodeStates.Cluster = cluster
-		nodeStates.Nodes = make(map[string]Node)
+		nodeStates.Nodes = make([]Node, 0)
+
+		nodesMap := make(map[string]Node)
 
 		for _, stat := range stats {
 			for _, hostname := range stat.Nodes.Nodes {
-				node, ok := nodeStates.Nodes[hostname]
+				node, ok := nodesMap[hostname]
 				if !ok {
 					node = Node{
 						States: make(map[string]bool),
 					}
 				}
 
+				node.Hostname = hostname
 				// For some reason the CPU core counts are aggregated over the number of nodes
 				node.CpusAllocated = *stat.Cpus.Allocated / len(stat.Nodes.Nodes)
 				node.CpusTotal = *stat.Cpus.Total / len(stat.Nodes.Nodes)
@@ -915,8 +919,12 @@ func ccSyncStats() error {
 					node.States[state] = true
 				}
 
-				nodeStates.Nodes[hostname] = node
+				nodesMap[hostname] = node
 			}
+		}
+
+		for _, node := range nodesMap {
+			nodeStates.Nodes = append(nodeStates.Nodes, node)
 		}
 
 		nodeStateDataJSON, err := json.Marshal(nodeStates)
