@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
@@ -113,4 +114,24 @@ func LoadConfig(configPath string) {
 	}
 
 	Config = newConf
+}
+
+func GetProtoAddr(s string) (string, string) {
+	// Config.IpcSockPath allowed formats:
+	// /var/lib/path_to_unix_socket
+	// unix:/var/lib/path_to_unix_socket
+	// tcp:127.0.0.1:12345
+	// tcp:0.0.0.0:12345
+	// tcp:[::1]:12345
+	// tcp:[::]:12345
+	// tcp::12345
+
+	addrElements := strings.SplitN(Config.IpcSockPath, ":", 2)
+	if len(addrElements) == 0 {
+		return "", ""
+	} else if len(addrElements) == 1 {
+		return "unix", s
+	} else {
+		return strings.ToLower(addrElements[0]), addrElements[1]
+	}
 }

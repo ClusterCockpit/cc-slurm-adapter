@@ -129,7 +129,7 @@ The non-optional values above show the default values.
 Config Key | Optional | Description
 --- | --- | ---
 `pidFilePath`       | yes | Path to the PID file. cc-slurm-adapter manages its own PID file in order to avoid concurrent execution.
-`ipcSockPath`       | yes | Path to the IPC socket. This socket is needed for cc-slurm-adapter running in prolog/epilog to communicate to cc-slurm-adapter running in daemon mode.
+`ipcSockPath`       | yes | Path to the IPC socket. This socket is needed for cc-slurm-adapter running in prolog/epilog to communicate to cc-slurm-adapter running in daemon mode. By default a UNIX socket is used, but it is possible to use a TCP socket for multi-slurmctld setups. Instead of using a plain path, you may use formats like the following: `tcp:127.0.0.1:12345`, `tcp:0.0.0.0:12345`, `tcp:[::1]:12345`, `tcp:[::]:12345`, `tcp::12345` (v4 + v6)
 `lastRunPath`       | yes | Path to the file which contains the time stamp of cc-slurm-adapter's last successful sync to cc-backend. Time is stored as a file timestamp, not in the file itself.
 `slurmPollInterval` | yes | Interval (seconds) in which a sync to cc-backend occurs, assuming no prolog/epilog event occurs.
 `slurmQueryDelay`   | yes | Time (seconds) to wait between prolog/epilog event to actual synchronization. This is just for good measure to give Slurm some time to react. There should usually be no need to change this.

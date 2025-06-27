@@ -99,8 +99,9 @@ func PrologEpilogMain() error {
 		return fmt.Errorf("Missing environment SLURM_JOB_ID")
 	}
 
-	trace.Debug("Connecting to Unix Socket")
-	con, err := net.Dial("unix", Config.IpcSockPath)
+	trace.Debug("Connecting to IPC Socket")
+	sockType, sockAddr := GetProtoAddr(Config.IpcSockPath)
+	con, err := net.Dial(sockType, sockAddr)
 	if err != nil {
 		return fmt.Errorf("Unable to connect to the daemon's unix socket. Is the daemon running?: %w", err)
 	}

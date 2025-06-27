@@ -232,19 +232,27 @@ func daemonInit() error {
 		return fmt.Errorf("Unable to create pid file: %w", err)
 	}
 
-	os.Remove(Config.IpcSockPath)
-	ipcSocket, err = net.Listen("unix", Config.IpcSockPath)
+	sockType, sockAddr := GetProtoAddr(Config.IpcSockPath)
+	if sockType == "unix" {
+		os.Remove(sockAddr)
+	}
+
+	ipcSocket, err = net.Listen(sockType, sockAddr)
 	if err != nil {
 		os.Remove(Config.PidFilePath)
 		return fmt.Errorf("Unable to create socket (is there an existing socket with bad permissions?): %w", err)
 	}
 
-	err = os.Chmod(Config.IpcSockPath, 0666)
-	if err != nil {
-		ipcSocket.Close()
-		os.Remove(Config.IpcSockPath)
-		os.Remove(Config.PidFilePath)
-		return fmt.Errorf("Failed to set permissions via chmod on IPC Socket: %w", err)
+	trace.Debug("Listening for IPC events on '%s:%s'", sockType, sockAddr)
+
+	if sockType == "unix" {
+		err = os.Chmod(sockAddr, 0666)
+		if err != nil {
+			ipcSocket.Close()
+			os.Remove(sockAddr)
+			os.Remove(Config.PidFilePath)
+			return fmt.Errorf("Failed to set permissions via chmod on IPC Socket: %w", err)
+		}
 	}
 
 	/* Init HTTP Client */
@@ -275,7 +283,9 @@ func daemonInit() error {
 		natsConn, err = nats.Connect(natsAddr, options...)
 		if err != nil {
 			ipcSocket.Close()
-			os.Remove(Config.IpcSockPath)
+			if sockType == "unix" {
+				os.Remove(sockAddr)
+			}
 			os.Remove(Config.PidFilePath)
 			return fmt.Errorf("Unable to connect to NATS (server: %s): %w", natsAddr, err)
 		}
@@ -655,7 +665,11 @@ func daemonQuit() {
 	 * actually is the daemon... */
 	trace.Debug("Closing Socket")
 	ipcSocket.Close()
-	os.Remove(Config.IpcSockPath)
+
+	sockType, sockAddr := GetProtoAddr(Config.IpcSockPath)
+	if sockType == "unix" {
+		os.Remove(sockAddr)
+	}
 	os.Remove(Config.PidFilePath)
 }
 
