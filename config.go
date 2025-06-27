@@ -32,7 +32,7 @@ var (
 
 type ProgramConfig struct {
 	PidFilePath       string              `json:"pidFilePath"`
-	IpcSockPath       string              `json:"ipcSocketPath"`
+	IpcSockPath       string              `json:"ipcSockPath"`
 	LastRunPath       string              `json:"lastRunPath"`
 	SlurmPollInterval int                 `json:"slurmPollInterval"`
 	SlurmQueryDelay   int                 `json:"slurmQueryDelay"`   // TODO give this a better name
