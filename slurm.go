@@ -32,6 +32,12 @@ type SlurmInt struct {
  */
 type SlurmString string
 
+/* SlurmIntString supports those two JSON layouts:
+ * - "123"
+ * - 123
+ */
+type SlurmIntString string
+
 type ScontrolJobResourcesNodesAllocationSocketCore struct {
 	Index  *int         `json:"index"`
 	Status *SlurmString `json:"status"`
@@ -129,9 +135,9 @@ type SacctJobTime struct {
 }
 
 type SlurmMetaSlurmVersion struct {
-	Major string `json:"major"`
-	Minor string `json:"minor"`
-	Micro string `json:"micro"`
+	Major SlurmIntString `json:"major"`
+	Minor SlurmIntString `json:"minor"`
+	Micro SlurmIntString `json:"micro"`
 }
 
 type SlurmMetaSlurm struct {
@@ -280,6 +286,25 @@ func (v *SlurmString) UnmarshalJSON(data []byte) error {
 
 	*v = SlurmString(data)
 	return nil
+}
+
+func (v *SlurmIntString) UnmarshalJSON(data []byte) error {
+	/* Slurm changed the usage of int to strings from v23 to v24 in its version field.
+	 * So allow this type to be parsed both ways. */
+	 var resultStr string
+	 err := json.Unmarshal(data, &resultStr)
+	 if err == nil {
+		 *v = SlurmIntString(resultStr)
+		 return nil
+	 }
+
+	 var resultInt int
+	 err = json.Unmarshal(data, &resultInt)
+	 if err == nil {
+		 *v = SlurmIntString(fmt.Sprintf("%d", resultInt))
+		 return nil
+	 }
+	 return err
 }
 
 func SlurmGetClusterNames() ([]string, error) {
@@ -563,8 +588,8 @@ func SlurmGetJobScript(job SacctJob) string {
 }
 
 func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
-	major, _ := strconv.Atoi(ver.Major)
-	minor, _ := strconv.Atoi(ver.Minor)
+	major, _ := strconv.Atoi(string(ver.Major))
+	minor, _ := strconv.Atoi(string(ver.Minor))
 	if major < SLURM_MAX_VER_MAJ {
 		return
 	}
