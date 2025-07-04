@@ -100,7 +100,7 @@ func PrologEpilogMain() error {
 	}
 
 	trace.Debug("Connecting to IPC Socket")
-	sockType, sockAddr := GetProtoAddr(Config.IpcSockPath)
+	sockType, sockAddr := GetProtoAddr(Config.IpcSockConnectPath)
 	con, err := net.Dial(sockType, sockAddr)
 	if err != nil {
 		return fmt.Errorf("Unable to connect to the daemon's unix socket. Is the daemon running?: %w", err)

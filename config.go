@@ -32,7 +32,8 @@ var (
 
 type ProgramConfig struct {
 	PidFilePath       string              `json:"pidFilePath"`
-	IpcSockPath       string              `json:"ipcSockPath"`
+	IpcSockListenPath string              `json:"ipcSockListenPath"`
+	IpcSockConnectPath string             `json:"ipcSockConnectPath"`
 	LastRunPath       string              `json:"lastRunPath"`
 	SlurmPollInterval int                 `json:"slurmPollInterval"`
 	SlurmQueryDelay   int                 `json:"slurmQueryDelay"`   // TODO give this a better name
@@ -61,7 +62,8 @@ func LoadConfig(configPath string) {
 	// default values
 	newConf := ProgramConfig{
 		PidFilePath:       DEFAULT_PID_FILE_PATH,
-		IpcSockPath:       DEFAULT_IPC_SOCK_PATH,
+		IpcSockListenPath: DEFAULT_IPC_SOCK_PATH,
+		IpcSockConnectPath: DEFAULT_IPC_SOCK_PATH,
 		LastRunPath:       DEFAULT_LAST_RUN_PATH,
 		CcPollInterval:    DEFAULT_CC_POLL_INTERVAL,
 		SlurmPollInterval: DEFAULT_SLURM_POLL_INTERVAL,
@@ -117,7 +119,7 @@ func LoadConfig(configPath string) {
 }
 
 func GetProtoAddr(s string) (string, string) {
-	// Config.IpcSockPath allowed formats:
+	// Config.IpcSock{Listen,Connect}Path allowed formats:
 	// /var/lib/path_to_unix_socket
 	// unix:/var/lib/path_to_unix_socket
 	// tcp:127.0.0.1:12345
@@ -126,7 +128,7 @@ func GetProtoAddr(s string) (string, string) {
 	// tcp:[::]:12345
 	// tcp::12345
 
-	addrElements := strings.SplitN(Config.IpcSockPath, ":", 2)
+	addrElements := strings.SplitN(s, ":", 2)
 	if len(addrElements) == 0 {
 		return "", ""
 	} else if len(addrElements) == 1 {

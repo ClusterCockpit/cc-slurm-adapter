@@ -232,7 +232,7 @@ func daemonInit() error {
 		return fmt.Errorf("Unable to create pid file: %w", err)
 	}
 
-	sockType, sockAddr := GetProtoAddr(Config.IpcSockPath)
+	sockType, sockAddr := GetProtoAddr(Config.IpcSockListenPath)
 	if sockType == "unix" {
 		os.Remove(sockAddr)
 	}
@@ -666,7 +666,7 @@ func daemonQuit() {
 	trace.Debug("Closing Socket")
 	ipcSocket.Close()
 
-	sockType, sockAddr := GetProtoAddr(Config.IpcSockPath)
+	sockType, sockAddr := GetProtoAddr(Config.IpcSockListenPath)
 	if sockType == "unix" {
 		os.Remove(sockAddr)
 	}
