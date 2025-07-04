@@ -92,7 +92,8 @@ Most values are optional, see Reference to see which ones you really need.
 ```json
 {
     "pidFilePath": "/run/cc-slurm-adapter/daemon.pid",
-    "ipcSockPath": "/run/cc-slurm-adapter/daemon.sock",
+    "prepSockListenPath": "/run/cc-slurm-adapter/daemon.sock",
+    "prepSockConnectPath": "/run/cc-slurm-adapter/daemon.sock",
     "lastRunPath": "/var/lib/cc-slurm-adapter/last_run",
     "slurmPollInterval": 60,
     "slurmQueryDelay": 1,
@@ -129,7 +130,9 @@ The non-optional values above show the default values.
 Config Key | Optional | Description
 --- | --- | ---
 `pidFilePath`       | yes | Path to the PID file. cc-slurm-adapter manages its own PID file in order to avoid concurrent execution.
-`ipcSockPath`       | yes | Path to the IPC socket. This socket is needed for cc-slurm-adapter running in prolog/epilog to communicate to cc-slurm-adapter running in daemon mode. By default a UNIX socket is used, but it is possible to use a TCP socket for multi-slurmctld setups. Instead of using a plain path, you may use formats like the following: `tcp:127.0.0.1:12345`, `tcp:0.0.0.0:12345`, `tcp:[::1]:12345`, `tcp:[::]:12345`, `tcp::12345` (v4 + v6)
+`ipcSockPath`       | N/A | This option has been removed and is replaced by `prepSockListenPath` and `prepSockConnectPath`.
+`prepSockListenPath` | yee | Path to the PrEp socket. This socket is needed for cc-slurm-adapter running in daemon mode to receive prolog/epilog events. By default a UNIX socket is used, but it is possible to use a TCP socket for multi-slurmctld setups. Instead of using a plain path, you may use formats like the following: `tcp:127.0.0.1:12345`, `tcp:0.0.0.0:12345`, `tcp:[::1]:12345`, `tcp:[::]:12345`, `tcp::12345` (v4 + v6)
+`prepSockConnectPath` | yes | Path to the PrEp socket. This socket is needed for cc-slurm-adapter running in prolog/epilog mode. Same format as `prepSockListenPath`.
 `lastRunPath`       | yes | Path to the file which contains the time stamp of cc-slurm-adapter's last successful sync to cc-backend. Time is stored as a file timestamp, not in the file itself.
 `slurmPollInterval` | yes | Interval (seconds) in which a sync to cc-backend occurs, assuming no prolog/epilog event occurs.
 `slurmQueryDelay`   | yes | Time (seconds) to wait between prolog/epilog event to actual synchronization. This is just for good measure to give Slurm some time to react. There should usually be no need to change this.
@@ -189,7 +192,7 @@ WantedBy=multi-user.target
 ```
 
 This service file runs the cc-slurm-adapter daemon as the user `cc-slurm-adapter`.
-A runtime directory /run/cc-slurm-adapter is created for the PID file and IPC socket.
+A runtime directory /run/cc-slurm-adapter is created for the PID file and PrEp socket.
 The group is set to `slurm` so that the RuntimeDirectoryMode=0750 will allow the group `slurm` to enter this directory.
 Access from the `slurm` group is only necessary, if the slurmctld Prolog/Epilog hook is used.
 That is because the Prolog/Epilog is executed as the slurm user/group and otherwise cc-slurm-adapter (in Prolog/Epilog mode) is unable to open the Unix socket in the runtime directory.
@@ -239,7 +242,7 @@ exit 0
 ```
 
 Generally speaking, it is not necessary to specify the config path during the Prolog/Epilog invocation.
-However, that is only the case if the default IPC socket path `/run/cc-slurm-adapter/daemon.sock` is used.
+However, that is only the case if the default PrEp socket path `/run/cc-slurm-adapter/daemon.sock` is used.
 If you want to change that, you have to add `-config /some_other_path/config.json` to your `hook.sh` script.
 In that case the config also has to be readable by the user or group `slurm`.
 

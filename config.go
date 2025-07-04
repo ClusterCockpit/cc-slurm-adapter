@@ -13,7 +13,7 @@ const (
 	DEFAULT_CONFIG_PATH string = "/etc/cc-slurm-adapter/config.json"
 
 	DEFAULT_PID_FILE_PATH            = "/run/cc-slurm-adapter/daemon.pid"
-	DEFAULT_IPC_SOCK_PATH            = "/run/cc-slurm-adapter/daemon.sock"
+	DEFAULT_PREP_SOCK_PATH            = "/run/cc-slurm-adapter/daemon.sock"
 	DEFAULT_LAST_RUN_PATH            = "/var/lib/cc-slurm-adapter/lastrun"
 	DEFAULT_SLURM_POLL_INTERVAL  int = 60
 	DEFAULT_SLURM_QUERY_DELAY        = 1
@@ -32,8 +32,8 @@ var (
 
 type ProgramConfig struct {
 	PidFilePath       string              `json:"pidFilePath"`
-	IpcSockListenPath string              `json:"ipcSockListenPath"`
-	IpcSockConnectPath string             `json:"ipcSockConnectPath"`
+	PrepSockListenPath string              `json:"prepSockListenPath"`
+	PrepSockConnectPath string             `json:"prepSockConnectPath"`
 	LastRunPath       string              `json:"lastRunPath"`
 	SlurmPollInterval int                 `json:"slurmPollInterval"`
 	SlurmQueryDelay   int                 `json:"slurmQueryDelay"`   // TODO give this a better name
@@ -62,8 +62,8 @@ func LoadConfig(configPath string) {
 	// default values
 	newConf := ProgramConfig{
 		PidFilePath:       DEFAULT_PID_FILE_PATH,
-		IpcSockListenPath: DEFAULT_IPC_SOCK_PATH,
-		IpcSockConnectPath: DEFAULT_IPC_SOCK_PATH,
+		PrepSockListenPath: DEFAULT_PREP_SOCK_PATH,
+		PrepSockConnectPath: DEFAULT_PREP_SOCK_PATH,
 		LastRunPath:       DEFAULT_LAST_RUN_PATH,
 		CcPollInterval:    DEFAULT_CC_POLL_INTERVAL,
 		SlurmPollInterval: DEFAULT_SLURM_POLL_INTERVAL,
@@ -119,7 +119,7 @@ func LoadConfig(configPath string) {
 }
 
 func GetProtoAddr(s string) (string, string) {
-	// Config.IpcSock{Listen,Connect}Path allowed formats:
+	// Config.PrepSock{Listen,Connect}Path allowed formats:
 	// /var/lib/path_to_unix_socket
 	// unix:/var/lib/path_to_unix_socket
 	// tcp:127.0.0.1:12345

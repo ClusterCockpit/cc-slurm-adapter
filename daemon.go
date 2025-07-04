@@ -46,7 +46,7 @@ type CacheJobState struct {
 const CACHE_EVICT_COUNT int = 5
 
 var (
-	ipcSocket  net.Listener
+	prepSocket net.Listener
 	httpClient http.Client
 	natsConn   *nats.Conn
 	jobEvents  []PrologEpilogSlurmctldEnv
@@ -78,8 +78,8 @@ func DaemonMain() error {
 	signalCtx, signalCancel := context.WithCancel(context.Background())
 
 	// start background routine that handles the Unix Socket
-	ipcSocketChan := make(chan []byte, 1024)
-	go ipcSocketListenRoutine(signalCtx, ipcSocketChan)
+	prepSocketChan := make(chan []byte, 1024)
+	go prepSocketListenRoutine(signalCtx, prepSocketChan)
 
 	queryDelay := time.Duration(Config.SlurmQueryDelay) * time.Second
 
@@ -101,14 +101,14 @@ func DaemonMain() error {
 
 		// cause Accept() on Unix socket to fail and unblock its routine.
 		signalCancel()
-		ipcSocket.Close()
+		prepSocket.Close()
 	}()
 
 	for {
 		/* Wait for the following cases:
 		 * - quit signal
 		 *   -> cancel loop
-		 * - IPC message received (binary invoked with -prolog or -epilog)
+		 * - PrEp message received (binary invoked with -prolog or -epilog)
 		 *   -> enqueue job to be queried via 'sacct' shortly after
 		 * - event timer elapsed
 		 *   -> query jobs via 'sacct' */
@@ -116,15 +116,15 @@ func DaemonMain() error {
 		case <-signalCtx.Done():
 			trace.Debug("Daemon terminating")
 			return nil
-		case msg := <-ipcSocketChan:
-			trace.Debug("Process IPC message (%d pending messages)", len(ipcSocketChan))
+		case msg := <-prepSocketChan:
+			trace.Debug("Process PrEp message (%d pending messages)", len(prepSocketChan))
 			err = jobEventEnqueue(msg)
 			if err != nil {
-				trace.Error("Unable to parse IPC message: %s", err)
+				trace.Error("Unable to parse PrEp message: %s", err)
 			}
 
 			/* We want to quickly poll Slurm after a job notification came in.
-			 * Though, we have to make sure we don't infinitely reset the timer if the IPC channel gets spammed.
+			 * Though, we have to make sure we don't infinitely reset the timer if the PrEp channel gets spammed.
 			 * This would otherwise cause the timer to continoulsy get reset and never actually fire. */
 			if !jobEventPending {
 				jobEventTimer.Reset(queryDelay)
@@ -168,9 +168,9 @@ func DaemonMain() error {
 	}
 }
 
-func ipcSocketListenRoutine(ctx context.Context, chn chan<- []byte) {
+func prepSocketListenRoutine(ctx context.Context, chn chan<- []byte) {
 	for {
-		conn, err := ipcSocket.Accept()
+		conn, err := prepSocket.Accept()
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -186,10 +186,10 @@ func ipcSocketListenRoutine(ctx context.Context, chn chan<- []byte) {
 			/* Run the connection handling asynchronously. This allows
 			 * the socket to accept a new connection almost immediatley. */
 			defer conn.Close()
-			trace.Debug("Receiving IPC message")
+			trace.Debug("Receiving PrEp message")
 			msg, err := io.ReadAll(conn)
 			if err != nil {
-				trace.Error("Failed to receive IPC message over Unix Socket: %s", err)
+				trace.Error("Failed to receive PrEp message over Unix Socket: %s", err)
 				return
 			}
 			chn <- msg
@@ -232,26 +232,26 @@ func daemonInit() error {
 		return fmt.Errorf("Unable to create pid file: %w", err)
 	}
 
-	sockType, sockAddr := GetProtoAddr(Config.IpcSockListenPath)
+	sockType, sockAddr := GetProtoAddr(Config.PrepSockListenPath)
 	if sockType == "unix" {
 		os.Remove(sockAddr)
 	}
 
-	ipcSocket, err = net.Listen(sockType, sockAddr)
+	prepSocket, err = net.Listen(sockType, sockAddr)
 	if err != nil {
 		os.Remove(Config.PidFilePath)
 		return fmt.Errorf("Unable to create socket (is there an existing socket with bad permissions?): %w", err)
 	}
 
-	trace.Debug("Listening for IPC events on '%s:%s'", sockType, sockAddr)
+	trace.Debug("Listening for PrEp events on '%s:%s'", sockType, sockAddr)
 
 	if sockType == "unix" {
 		err = os.Chmod(sockAddr, 0666)
 		if err != nil {
-			ipcSocket.Close()
+			prepSocket.Close()
 			os.Remove(sockAddr)
 			os.Remove(Config.PidFilePath)
-			return fmt.Errorf("Failed to set permissions via chmod on IPC Socket: %w", err)
+			return fmt.Errorf("Failed to set permissions via chmod on PrEp Socket: %w", err)
 		}
 	}
 
@@ -282,7 +282,7 @@ func daemonInit() error {
 		trace.Info("Connecting to NATS: %s", natsAddr)
 		natsConn, err = nats.Connect(natsAddr, options...)
 		if err != nil {
-			ipcSocket.Close()
+			prepSocket.Close()
 			if sockType == "unix" {
 				os.Remove(sockAddr)
 			}
@@ -495,7 +495,7 @@ func ccCacheGC() {
 	}
 }
 
-func jobEventEnqueue(ipcMsg []byte) error {
+func jobEventEnqueue(prepMsg []byte) error {
 	/* The message received contains a JSON, which contains all relevant
 	 * environment variables from here:
 	 * https://slurm.schedmd.com/prolog_epilog.html.
@@ -503,9 +503,9 @@ func jobEventEnqueue(ipcMsg []byte) error {
 	 * available in TaskProlog/TaskEpilog. However, we only run in slurmctld
 	 * context, so only their appropriate values are available. */
 	var env PrologEpilogSlurmctldEnv
-	err := json.Unmarshal(ipcMsg, &env)
+	err := json.Unmarshal(prepMsg, &env)
 	if err != nil {
-		return fmt.Errorf("Unable to parse IPC message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in our IPC protocol: '%s'", err, string(ipcMsg))
+		return fmt.Errorf("Unable to parse PrEp message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in our IPC protocol: '%s'", err, string(prepMsg))
 	}
 
 	env.SacctAttempts = 0
@@ -664,9 +664,9 @@ func daemonQuit() {
 	 * check against any process with that PID and not if it
 	 * actually is the daemon... */
 	trace.Debug("Closing Socket")
-	ipcSocket.Close()
+	prepSocket.Close()
 
-	sockType, sockAddr := GetProtoAddr(Config.IpcSockListenPath)
+	sockType, sockAddr := GetProtoAddr(Config.PrepSockListenPath)
 	if sockType == "unix" {
 		os.Remove(sockAddr)
 	}
