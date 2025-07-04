@@ -947,7 +947,7 @@ func ccSyncStats() error {
 		}
 
 		// TODO remove this continue statement, once we actually want to submit things to CC
-		fmt.Printf("CC STATE SYNC: %v\n", string(nodeStateDataJSON))
+		trace.Debug("CC STATE SYNC: %v\n", string(nodeStateDataJSON))
 		continue
 
 		respNodeState, err := ccPost("/nodes/update/", nodeStateDataJSON)
