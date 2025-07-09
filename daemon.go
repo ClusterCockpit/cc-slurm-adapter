@@ -922,8 +922,8 @@ func ccSyncStats() error {
 				gresTotal, errTotal := SlurmParseGRES(*stat.Gres.Total)
 				gresAlloc, errAlloc := SlurmParseGRES(*stat.Gres.Used)
 				if errTotal == nil && errAlloc == nil {
-					node.GpusTotal = gresTotal.Count
-					node.GpusAllocated = gresAlloc.Count
+					node.GpusTotal = int(gresTotal.Count)
+					node.GpusAllocated = int(gresAlloc.Count)
 				} else {
 					node.GpusTotal = 0
 					node.GpusAllocated = 0
@@ -1061,11 +1061,11 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	setResources := func(tresList []SacctJobTres, ccStartJob *StartJob) {
 		for _, tres := range tresList {
 			if *tres.Type == "cpu" {
-				ccStartJob.BaseJob.NumHWThreads = *tres.Count
+				ccStartJob.BaseJob.NumHWThreads = int32(*tres.Count)
 			}
 
 			if *tres.Type == "gres" && *tres.Name == "gpu" {
-				ccStartJob.BaseJob.NumAcc = *tres.Count
+				ccStartJob.BaseJob.NumAcc = int32(*tres.Count)
 			}
 		}
 	}
