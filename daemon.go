@@ -19,16 +19,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ClusterCockpit/cc-backend/pkg/schema"
+	"github.com/ClusterCockpit/cc-lib/schema"
 	"github.com/ClusterCockpit/cc-lib/ccMessage"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/nats-io/nats.go"
 )
 
-type StartJob struct {
-	schema.BaseJob
-	StartTime int64 `json:"startTime"`
-}
+type StartJob schema.Job
 
 type StopJob struct {
 	JobId    uint32          `json:"jobId"     db:"job_id"`
@@ -360,9 +357,9 @@ func ccCacheUpdate() error {
 	}
 
 	getJobsApiResponse := struct {
-		Jobs  []*schema.JobMeta `json:"jobs"`
-		Items int               `json:"items"`
-		Page  int               `json:"page"`
+		Jobs  []*schema.Job `json:"jobs"`
+		Items int           `json:"items"`
+		Page  int           `json:"page"`
 	}{}
 
 	err = json.Unmarshal(body, &getJobsApiResponse)
@@ -383,10 +380,10 @@ func ccCacheUpdate() error {
 
 	// Create mapping from cluster -> jobid -> job from cc-backend data.
 	// Compare this mapping to our current cache to detect, if there have been differences.
-	ccJobState := make(map[string]map[int64]*schema.JobMeta)
+	ccJobState := make(map[string]map[int64]*schema.Job)
 	for _, job := range getJobsApiResponse.Jobs {
 		if ccJobState[job.Cluster] == nil {
-			ccJobState[job.Cluster] = make(map[int64]*schema.JobMeta)
+			ccJobState[job.Cluster] = make(map[int64]*schema.Job)
 		}
 		ccJobState[job.Cluster][job.JobID] = job
 	}
@@ -791,7 +788,7 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 			}
 		}
 
-		if !jobHasResources(&startJobData.BaseJob) {
+		if !jobHasResources(schema.Job(*startJobData)) {
 			// This should only happen if we resynchronize a job, after is has already stopped for some time.
 			trace.Warn("Unable to obtain Job (%s, %d) with hwthread/accelerator information. Some metrics may be missing in ClusterCockpit.", *job.Cluster, *job.JobId)
 		}
@@ -1039,21 +1036,19 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	}
 
 	ccStartJob := StartJob{
-		BaseJob: schema.BaseJob{
-			Cluster:      *job.Cluster,
-			Partition:    *job.Partition,
-			Project:      *job.Account,
-			ArrayJobId:   int64(*job.Array.JobId),
-			NumNodes:     int32(job.AllocationNodes.Number),
-			NumHWThreads: int32(job.Required.CPUs.Number),
-			Exclusive:    exclusive,
-			Walltime:     job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
-			Resources:    resources,
-			MetaData:     metaData,
-			JobID:        int64(*job.JobId),
-			User:         *job.User,
-		},
-		StartTime: job.Time.Start.Number,
+		Cluster:      *job.Cluster,
+		Partition:    *job.Partition,
+		Project:      *job.Account,
+		ArrayJobId:   int64(*job.Array.JobId),
+		NumNodes:     int32(job.AllocationNodes.Number),
+		NumHWThreads: int32(job.Required.CPUs.Number),
+		Exclusive:    exclusive,
+		Walltime:     job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
+		Resources:    resources,
+		MetaData:     metaData,
+		JobID:        int64(*job.JobId),
+		User:         *job.User,
+		StartTime:    job.Time.Start.Number,
 	}
 
 	/* Determine number of CPUs and accelerators. Use requested values
@@ -1061,11 +1056,11 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	setResources := func(tresList []SacctJobTres, ccStartJob *StartJob) {
 		for _, tres := range tresList {
 			if *tres.Type == "cpu" {
-				ccStartJob.BaseJob.NumHWThreads = *tres.Count
+				ccStartJob.NumHWThreads = *tres.Count
 			}
 
 			if *tres.Type == "gres" && *tres.Name == "gpu" {
-				ccStartJob.BaseJob.NumAcc = *tres.Count
+				ccStartJob.NumAcc = *tres.Count
 			}
 		}
 	}
@@ -1138,9 +1133,9 @@ func checkIgnoreJob(job SacctJob, startJobData *StartJob) bool {
 	return false
 }
 
-func jobHasResources(baseJob *schema.BaseJob) bool {
+func jobHasResources(job schema.Job) bool {
 	hasResource := false
-	for _, resource := range baseJob.Resources {
+	for _, resource := range job.Resources {
 		if resource.HWThreads != nil {
 			hasResource = true
 			break
