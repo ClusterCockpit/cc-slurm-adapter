@@ -524,6 +524,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 							accelerators = append(accelerators, pciAddrList[v])
 						}
 						found = true
+						break
 					}
 				}
 				if !found {
