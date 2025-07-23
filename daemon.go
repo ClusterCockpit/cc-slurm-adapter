@@ -871,6 +871,28 @@ func ccSyncStats() error {
 	//slurmStateToCCSate := make(map[string]string)
 
 	for _, cluster := range slurmClusters {
+		// Create a list of nodes and the jobs that are running on those
+		jobs, err := SlurmQueryJobsActive(cluster)
+		if err != nil {
+			trace.Error("Unable to query Slurm via squeue (is Slurm available?)")
+			break
+		}
+
+		hostToJobs := make(map[string]map[int64]bool)
+		for _, scJob := range jobs {
+			if *scJob.JobState != "RUNNING" {
+				continue
+			}
+
+			for _, alloc := range scJob.JobResources.Nodes.Allocation {
+				if hostToJobs[*alloc.Hostname] == nil {
+					hostToJobs[*alloc.Hostname] = make(map[int64]bool)
+				}
+				hostToJobs[*alloc.Hostname][int64(*scJob.JobId)] = true
+			}
+		}
+
+		// Obtain various cluster stats like used CPUs, GPUs, etc.
 		stats, err := SlurmGetClusterStats(cluster)
 		if err != nil {
 			trace.Error("Unable to sync Slurm stats to cc-backend: %v", err)
@@ -887,6 +909,7 @@ func ccSyncStats() error {
 			MemoryTotal     int             `json:"memoryTotal"`
 			GpusAllocated   int             `json:"gpusAllocated"`
 			GpusTotal       int             `json:"gpusTotal"`
+			JobsRunning     int             `json:"jobsRunning"`
 		}
 
 		nodeStates := struct {
@@ -929,6 +952,8 @@ func ccSyncStats() error {
 				for _, state := range stat.Node.State {
 					node.States[state] = true
 				}
+
+				node.JobsRunning = len(hostToJobs[hostname])
 
 				nodesMap[hostname] = node
 			}
