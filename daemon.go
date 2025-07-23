@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ClusterCockpit/cc-lib/schema"
 	"github.com/ClusterCockpit/cc-lib/ccMessage"
+	"github.com/ClusterCockpit/cc-lib/schema"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/nats-io/nats.go"
 )

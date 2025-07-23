@@ -128,10 +128,10 @@ type SacctJobRequired struct {
 
 type SacctJobTime struct {
 	/* Only (our) required fields are listed here. */
-	Elapsed SlurmInt `json:"elapsed"`
-	End     SlurmInt `json:"end"`
-	Limit   SlurmInt `json:"limit"`
-	Start   SlurmInt `json:"start"`
+	Elapsed    SlurmInt `json:"elapsed"`
+	End        SlurmInt `json:"end"`
+	Limit      SlurmInt `json:"limit"`
+	Start      SlurmInt `json:"start"`
 	Submission SlurmInt `json:"submission"`
 }
 
@@ -292,20 +292,20 @@ func (v *SlurmString) UnmarshalJSON(data []byte) error {
 func (v *SlurmIntString) UnmarshalJSON(data []byte) error {
 	/* Slurm changed the usage of int to strings from v23 to v24 in its version field.
 	 * So allow this type to be parsed both ways. */
-	 var resultStr string
-	 err := json.Unmarshal(data, &resultStr)
-	 if err == nil {
-		 *v = SlurmIntString(resultStr)
-		 return nil
-	 }
+	var resultStr string
+	err := json.Unmarshal(data, &resultStr)
+	if err == nil {
+		*v = SlurmIntString(resultStr)
+		return nil
+	}
 
-	 var resultInt int
-	 err = json.Unmarshal(data, &resultInt)
-	 if err == nil {
-		 *v = SlurmIntString(fmt.Sprintf("%d", resultInt))
-		 return nil
-	 }
-	 return err
+	var resultInt int
+	err = json.Unmarshal(data, &resultInt)
+	if err == nil {
+		*v = SlurmIntString(fmt.Sprintf("%d", resultInt))
+		return nil
+	}
+	return err
 }
 
 func SlurmGetClusterNames() ([]string, error) {
