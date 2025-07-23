@@ -160,10 +160,11 @@ type SacctJobRequired struct {
 
 type SacctJobTime struct {
 	/* Only (our) required fields are listed here. */
-	Elapsed SlurmInt `json:"elapsed"`
-	End     SlurmInt `json:"end"`
-	Limit   SlurmInt `json:"limit"`
-	Start   SlurmInt `json:"start"`
+	Elapsed    SlurmInt `json:"elapsed"`
+	End        SlurmInt `json:"end"`
+	Limit      SlurmInt `json:"limit"`
+	Start      SlurmInt `json:"start"`
+	Submission SlurmInt `json:"submission"`
 }
 
 type SlurmMetaSlurmVersion struct {
@@ -556,6 +557,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 							accelerators = append(accelerators, pciAddrList[v])
 						}
 						found = true
+						break
 					}
 				}
 				if !found {

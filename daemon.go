@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ClusterCockpit/cc-lib/schema"
 	"github.com/ClusterCockpit/cc-lib/ccMessage"
+	"github.com/ClusterCockpit/cc-lib/schema"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 	"github.com/nats-io/nats.go"
 )
@@ -871,6 +871,28 @@ func ccSyncStats() error {
 	//slurmStateToCCSate := make(map[string]string)
 
 	for _, cluster := range slurmClusters {
+		// Create a list of nodes and the jobs that are running on those
+		jobs, err := SlurmQueryJobsActive(cluster)
+		if err != nil {
+			trace.Error("Unable to query Slurm via squeue (is Slurm available?)")
+			break
+		}
+
+		hostToJobs := make(map[string]map[int64]bool)
+		for _, scJob := range jobs {
+			if *scJob.JobState != "RUNNING" {
+				continue
+			}
+
+			for _, alloc := range scJob.JobResources.Nodes.Allocation {
+				if hostToJobs[*alloc.Hostname] == nil {
+					hostToJobs[*alloc.Hostname] = make(map[int64]bool)
+				}
+				hostToJobs[*alloc.Hostname][int64(*scJob.JobId)] = true
+			}
+		}
+
+		// Obtain various cluster stats like used CPUs, GPUs, etc.
 		stats, err := SlurmGetClusterStats(cluster)
 		if err != nil {
 			trace.Error("Unable to sync Slurm stats to cc-backend: %v", err)
@@ -887,6 +909,7 @@ func ccSyncStats() error {
 			MemoryTotal     int             `json:"memoryTotal"`
 			GpusAllocated   int             `json:"gpusAllocated"`
 			GpusTotal       int             `json:"gpusTotal"`
+			JobsRunning     int             `json:"jobsRunning"`
 		}
 
 		nodeStates := struct {
@@ -930,6 +953,8 @@ func ccSyncStats() error {
 					node.States[state] = true
 				}
 
+				node.JobsRunning = len(hostToJobs[hostname])
+
 				nodesMap[hostname] = node
 			}
 		}
@@ -947,7 +972,7 @@ func ccSyncStats() error {
 		trace.Debug("CC STATE SYNC: %v\n", string(nodeStateDataJSON))
 		continue
 
-		respNodeState, err := ccPost("/nodes/update/", nodeStateDataJSON)
+		respNodeState, err := ccPost("/nodestate/", nodeStateDataJSON)
 		if err != nil {
 			return err
 		}
@@ -1017,6 +1042,7 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	metaData["jobScript"] = SlurmGetJobScript(job)
 	metaData["jobName"] = *job.Name
 	metaData["slurmInfo"] = SlurmGetJobInfoText(job)
+	metaData["submitTime"] = fmt.Sprintf("%v", job.Time.Submission.Number)
 
 	var exclusive int32
 	if scJob != nil {

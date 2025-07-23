@@ -13,7 +13,7 @@ const (
 	DEFAULT_CONFIG_PATH string = "/etc/cc-slurm-adapter/config.json"
 
 	DEFAULT_PID_FILE_PATH            = "/run/cc-slurm-adapter/daemon.pid"
-	DEFAULT_PREP_SOCK_PATH            = "/run/cc-slurm-adapter/daemon.sock"
+	DEFAULT_PREP_SOCK_PATH           = "/run/cc-slurm-adapter/daemon.sock"
 	DEFAULT_LAST_RUN_PATH            = "/var/lib/cc-slurm-adapter/lastrun"
 	DEFAULT_SLURM_POLL_INTERVAL  int = 60
 	DEFAULT_SLURM_QUERY_DELAY        = 1
@@ -31,26 +31,26 @@ var (
 )
 
 type ProgramConfig struct {
-	PidFilePath       string              `json:"pidFilePath"`
-	PrepSockListenPath string              `json:"prepSockListenPath"`
-	PrepSockConnectPath string             `json:"prepSockConnectPath"`
-	LastRunPath       string              `json:"lastRunPath"`
-	SlurmPollInterval int                 `json:"slurmPollInterval"`
-	SlurmQueryDelay   int                 `json:"slurmQueryDelay"`   // TODO give this a better name
-	SlurmQueryMaxSpan int                 `json:"slurmQueryMaxSpan"` // TODO change the name of this
-	SlurmMaxRetries   int                 `json:"slurmMaxRetries"`
-	CcRestUrl         string              `json:"ccRestUrl"`
-	CcRestJwt         string              `json:"ccRestJwt"`
-	CcPollInterval    int                 `json:"ccPollInterval"`
-	GpuPciAddrs       map[string][]string `json:"gpuPciAddrs"`
-	IgnoreHosts       string              `json:"ignoreHosts"`
-	NatsServer        string              `json:"natsServer"`
-	NatsPort          uint16              `json:"natsPort"`
-	NatsSubject       string              `json:"natsSubject"`
-	NatsUser          string              `json:"natsUser"`
-	NatsPassword      string              `json:"natsPassword"`
-	NatsCredsFile     string              `json:"natsCredsFile"`
-	NatsNKeySeedFile  string              `json:"natsNKeySeedFile"`
+	PidFilePath         string              `json:"pidFilePath"`
+	PrepSockListenPath  string              `json:"prepSockListenPath"`
+	PrepSockConnectPath string              `json:"prepSockConnectPath"`
+	LastRunPath         string              `json:"lastRunPath"`
+	SlurmPollInterval   int                 `json:"slurmPollInterval"`
+	SlurmQueryDelay     int                 `json:"slurmQueryDelay"`   // TODO give this a better name
+	SlurmQueryMaxSpan   int                 `json:"slurmQueryMaxSpan"` // TODO change the name of this
+	SlurmMaxRetries     int                 `json:"slurmMaxRetries"`
+	CcRestUrl           string              `json:"ccRestUrl"`
+	CcRestJwt           string              `json:"ccRestJwt"`
+	CcPollInterval      int                 `json:"ccPollInterval"`
+	GpuPciAddrs         map[string][]string `json:"gpuPciAddrs"`
+	IgnoreHosts         string              `json:"ignoreHosts"`
+	NatsServer          string              `json:"natsServer"`
+	NatsPort            uint16              `json:"natsPort"`
+	NatsSubject         string              `json:"natsSubject"`
+	NatsUser            string              `json:"natsUser"`
+	NatsPassword        string              `json:"natsPassword"`
+	NatsCredsFile       string              `json:"natsCredsFile"`
+	NatsNKeySeedFile    string              `json:"natsNKeySeedFile"`
 }
 
 func LoadConfig(configPath string) {
@@ -61,18 +61,18 @@ func LoadConfig(configPath string) {
 
 	// default values
 	newConf := ProgramConfig{
-		PidFilePath:       DEFAULT_PID_FILE_PATH,
-		PrepSockListenPath: DEFAULT_PREP_SOCK_PATH,
+		PidFilePath:         DEFAULT_PID_FILE_PATH,
+		PrepSockListenPath:  DEFAULT_PREP_SOCK_PATH,
 		PrepSockConnectPath: DEFAULT_PREP_SOCK_PATH,
-		LastRunPath:       DEFAULT_LAST_RUN_PATH,
-		CcPollInterval:    DEFAULT_CC_POLL_INTERVAL,
-		SlurmPollInterval: DEFAULT_SLURM_POLL_INTERVAL,
-		SlurmQueryDelay:   DEFAULT_SLURM_QUERY_DELAY,
-		SlurmQueryMaxSpan: DEFAULT_SLURM_QUERY_MAX_SPAN,
-		SlurmMaxRetries:   DEFAULT_SLURM_MAX_RETRIES,
-		GpuPciAddrs:       make(map[string][]string),
-		NatsPort:          DEFAULT_NATS_PORT,
-		NatsSubject:       DEFAULT_NATS_SUBJECT,
+		LastRunPath:         DEFAULT_LAST_RUN_PATH,
+		CcPollInterval:      DEFAULT_CC_POLL_INTERVAL,
+		SlurmPollInterval:   DEFAULT_SLURM_POLL_INTERVAL,
+		SlurmQueryDelay:     DEFAULT_SLURM_QUERY_DELAY,
+		SlurmQueryMaxSpan:   DEFAULT_SLURM_QUERY_MAX_SPAN,
+		SlurmMaxRetries:     DEFAULT_SLURM_MAX_RETRIES,
+		GpuPciAddrs:         make(map[string][]string),
+		NatsPort:            DEFAULT_NATS_PORT,
+		NatsSubject:         DEFAULT_NATS_SUBJECT,
 	}
 
 	fileContents, err := os.ReadFile(configPath)
