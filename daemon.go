@@ -1042,6 +1042,7 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	metaData["jobScript"] = SlurmGetJobScript(job)
 	metaData["jobName"] = *job.Name
 	metaData["slurmInfo"] = SlurmGetJobInfoText(job)
+	metaData["submitTime"] = fmt.Sprintf("%v", job.Time.Submission.Number)
 
 	var exclusive int32
 	if scJob != nil {

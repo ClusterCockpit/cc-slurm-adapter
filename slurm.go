@@ -132,6 +132,7 @@ type SacctJobTime struct {
 	End     SlurmInt `json:"end"`
 	Limit   SlurmInt `json:"limit"`
 	Start   SlurmInt `json:"start"`
+	Submission SlurmInt `json:"submission"`
 }
 
 type SlurmMetaSlurmVersion struct {
