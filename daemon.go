@@ -972,7 +972,7 @@ func ccSyncStats() error {
 		trace.Debug("CC STATE SYNC: %v\n", string(nodeStateDataJSON))
 		continue
 
-		respNodeState, err := ccPost("/nodes/update/", nodeStateDataJSON)
+		respNodeState, err := ccPost("/nodestate/", nodeStateDataJSON)
 		if err != nil {
 			return err
 		}
