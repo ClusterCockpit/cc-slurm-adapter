@@ -90,11 +90,43 @@ type SacctJobArray struct {
 	JobId *uint32 `json:"job_id"`
 }
 
+type SlurmTresCount uint64
+
+func (v *SlurmTresCount) UnmarshalJSON(data []byte) error {
+	var num int64
+	if err := json.Unmarshal(data, &num); err == nil {
+		if num < 0 {
+			*v = 0
+		} else {
+			*v = SlurmTresCount(num)
+		}
+		return nil
+	}
+
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		parsed, err := strconv.ParseInt(str, 10, 64)
+		if err == nil {
+			if parsed < 0 {
+				*v = 0
+			} else {
+				*v = SlurmTresCount(parsed)
+			}
+			return nil
+		}
+		trace.Debug("Failed to parse SlurmTresCount: input='%s', error='%v'", string(data), err)
+		return fmt.Errorf("Unable to parse '%s' as Slurm tres count: invalid format or possible Slurm version incompatibility", string(data))
+	}
+
+	trace.Debug("Failed to parse SlurmTresCount: input='%s', error='neither integer nor string'", string(data))
+	return fmt.Errorf("Unable to parse '%s' as Slurm tres count: invalid format or possible Slurm version incompatibility", string(data))
+}
+
 type SacctJobTres struct {
-	Type  *string `json:"type"`
-	Name  *string `json:"name"`
-	Id    *int32  `json:"id"`
-	Count *int32  `json:"count"`
+	Type  *string         `json:"type"`
+	Name  *string         `json:"name"`
+	Id    *int32          `json:"id"`
+	Count *SlurmTresCount `json:"count"`
 }
 
 type SacctJobTresList struct {
@@ -219,7 +251,7 @@ type SinfoResult struct {
 type GRES struct {
 	Variant       string // e.g. "gpu"
 	Id            string // e.g. "h100"
-	Count         int    // e.g. "4"
+	Count         uint64 // e.g. "4"
 	DomainType    string // e.g. "S", "IDX"
 	DomainIndices []int
 }
@@ -670,7 +702,7 @@ func SlurmParseGRES(gres string) (*GRES, error) {
 		return nil, fmt.Errorf("Unable to parse GRES: '%s'", gres)
 	}
 
-	count, err := strconv.ParseInt(gresParsed[3], 10, 32)
+	count, err := strconv.ParseUint(gresParsed[3], 10, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -678,7 +710,7 @@ func SlurmParseGRES(gres string) (*GRES, error) {
 	return &GRES{
 		Variant:       gresParsed[1],
 		Id:            gresParsed[2],
-		Count:         int(count),
+		Count:         count,
 		DomainType:    gresParsed[4],
 		DomainIndices: rangeStringToInts(gresParsed[5]),
 	}, nil
