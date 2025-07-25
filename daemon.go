@@ -1039,7 +1039,10 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	}
 
 	metaData := make(map[string]string)
-	metaData["jobScript"] = SlurmGetJobScript(job)
+	jobScript := SlurmGetJobScript(job)
+	if jobScript != "" {
+		metaData["jobScript"] = jobScript
+	}
 	metaData["jobName"] = *job.Name
 	metaData["slurmInfo"] = SlurmGetJobInfoText(job)
 	metaData["submitTime"] = fmt.Sprintf("%v", job.Time.Submission.Number)
