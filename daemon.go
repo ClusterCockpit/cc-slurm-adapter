@@ -963,29 +963,29 @@ func ccSyncStats() error {
 			nodeStates.Nodes = append(nodeStates.Nodes, node)
 		}
 
-		nodeStateDataJSON, err := json.Marshal(nodeStates)
+		_, err = json.Marshal(nodeStates)
 		if err != nil {
 			return fmt.Errorf("Unable to convert NodeState to JSON: %w", err)
 		}
 
 		// TODO remove this continue statement, once we actually want to submit things to CC
-		trace.Debug("CC STATE SYNC: %v\n", string(nodeStateDataJSON))
+		//trace.Debug("CC STATE SYNC: %v\n", string(nodeStateDataJSON))
 		continue
 
-		respNodeState, err := ccPost("/nodestate/", nodeStateDataJSON)
-		if err != nil {
-			return err
-		}
+		//respNodeState, err := ccPost("/nodestate/", nodeStateDataJSON)
+		//if err != nil {
+		//	return err
+		//}
 
-		defer respNodeState.Body.Close()
-		body, err := io.ReadAll(respNodeState.Body)
-		if err != nil {
-			return err
-		}
+		//defer respNodeState.Body.Close()
+		//body, err := io.ReadAll(respNodeState.Body)
+		//if err != nil {
+		//	return err
+		//}
 
-		if respNodeState.StatusCode != 201 {
-			return fmt.Errorf("Calling /nodes/update/ (%s) failed with HTTP: %d: Body: %s", cluster, respNodeState.StatusCode, string(body))
-		}
+		//if respNodeState.StatusCode != 201 {
+		//	return fmt.Errorf("Calling /nodes/update/ (%s) failed with HTTP: %d: Body: %s", cluster, respNodeState.StatusCode, string(body))
+		//}
 	}
 
 	trace.Info("Updated CC node state on clusters %v", slurmClusters)
