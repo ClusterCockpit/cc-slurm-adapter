@@ -69,7 +69,7 @@ func DaemonMain() error {
 	}
 	defer daemonQuit()
 
-	/* Init Signal Handling */
+	// Init Signal Handling
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 	signalCtx, signalCancel := context.WithCancel(context.Background())
@@ -88,7 +88,7 @@ func DaemonMain() error {
 	<-jobEventTimer.C
 	jobEventPending := false
 
-	/* Signal Handler definition */
+	// Signal Handler definition
 	go func() {
 		<-signalChan
 		trace.Debug("Received signal, shutting down...")
@@ -102,13 +102,13 @@ func DaemonMain() error {
 	}()
 
 	for {
-		/* Wait for the following cases:
-		 * - quit signal
-		 *   -> cancel loop
-		 * - PrEp message received (binary invoked with -prolog or -epilog)
-		 *   -> enqueue job to be queried via 'sacct' shortly after
-		 * - event timer elapsed
-		 *   -> query jobs via 'sacct' */
+		// Wait for the following cases:
+		// - quit signal
+		//   -> cancel loop
+		// - PrEp message received (binary invoked with -prolog or -epilog)
+		//   -> enqueue job to be queried via 'sacct' shortly after
+		// - event timer elapsed
+		//   -> query jobs via 'sacct'
 		select {
 		case <-signalCtx.Done():
 			trace.Debug("Daemon terminating")
@@ -120,9 +120,9 @@ func DaemonMain() error {
 				trace.Error("Unable to parse PrEp message: %s", err)
 			}
 
-			/* We want to quickly poll Slurm after a job notification came in.
-			 * Though, we have to make sure we don't infinitely reset the timer if the PrEp channel gets spammed.
-			 * This would otherwise cause the timer to continoulsy get reset and never actually fire. */
+			// We want to quickly poll Slurm after a job notification came in.
+			// Though, we have to make sure we don't infinitely reset the timer if the PrEp channel gets spammed.
+			// This would otherwise cause the timer to continoulsy get reset and never actually fire.
 			if !jobEventPending {
 				jobEventTimer.Reset(queryDelay)
 				jobEventPending = true
@@ -180,8 +180,8 @@ func prepSocketListenRoutine(ctx context.Context, chn chan<- []byte) {
 		}
 
 		go func() {
-			/* Run the connection handling asynchronously. This allows
-			 * the socket to accept a new connection almost immediatley. */
+			// Run the connection handling asynchronously. This allows
+			// the socket to accept a new connection almost immediatley.
 			defer conn.Close()
 			trace.Debug("Receiving PrEp message")
 			msg, err := io.ReadAll(conn)
@@ -201,20 +201,20 @@ func daemonInit() error {
 		return fmt.Errorf("Unable to obtain hostname: %w", err)
 	}
 
-	/* Assert last_run is writable. That way crash immediately instead after a long delay. */
+	// Assert last_run is writable. That way crash immediately instead after a long delay.
 	lastRunSet(lastRunGet())
 
-	/* Verify Slurm Permissions */
+	// Verify Slurm Permissions
 	SlurmCheckPerms()
 
-	/* Init Unix Socket */
+	// Init Unix Socket
 	trace.Debug("Opening Socket")
 
-	/* First check, if another daemon instance is already running.
-	 * If a pid file is found, check if that process is still running.
-	 * If it is still running, raise an error. If it is not running,
-	 * the pid file is orphaned, and can be deleted. If no pid file exists
-	 * we can safely start the daemon immediately. */
+	// First check, if another daemon instance is already running.
+	// If a pid file is found, check if that process is still running.
+	// If it is still running, raise an error. If it is not running,
+	// the pid file is orphaned, and can be deleted. If no pid file exists
+	// we can safely start the daemon immediately.
 	pidFileContent, err := os.ReadFile(Config.PidFilePath)
 	if err == nil {
 		trimmedPidFileContent := strings.TrimSpace(string(pidFileContent))
@@ -252,14 +252,14 @@ func daemonInit() error {
 		}
 	}
 
-	/* Init HTTP Client */
+	// Init HTTP Client
 	tr := &http.Transport{
 		MaxIdleConns:    10,
 		IdleConnTimeout: 2 * time.Duration(Config.SlurmPollInterval) * time.Second,
 	}
 	httpClient = http.Client{Transport: tr}
 
-	/* Init NATS Client */
+	// Init NATS Client
 	options := make([]nats.Option, 0)
 	if len(Config.NatsUser) > 0 {
 		options = append(options, nats.UserInfo(Config.NatsUser, Config.NatsPassword))
@@ -288,10 +288,10 @@ func daemonInit() error {
 		}
 	}
 
-	/* job events queue initialization */
+	// job events queue initialization
 	jobEvents = make([]PrologEpilogSlurmctldEnv, 0)
 
-	/* Get the clusters managed by Slurm */
+	// Get the clusters managed by Slurm
 	slurmClusters, err = SlurmGetClusterNames()
 	if err != nil {
 		return fmt.Errorf("Unable to determine cluster hostnames: %w", err)
@@ -300,7 +300,7 @@ func daemonInit() error {
 
 	printWelcome()
 
-	/* Init cc job state cache */
+	// Init cc job state cache
 	trace.Debug("Fetching initial job state from cc-backend")
 	err = ccCacheUpdate()
 	if err != nil {
@@ -334,8 +334,8 @@ func printWelcome() {
 }
 
 func ccCacheUpdate() error {
-	/* We maintain a local cache of which jobs are marked as running in cc-backend.
-	 * Only refresh it if the cache was invalidated or if it wasn't refreshed for some time. */
+	// We maintain a local cache of which jobs are marked as running in cc-backend.
+	// Only refresh it if the cache was invalidated or if it wasn't refreshed for some time.
 	if ccJobCacheValid && ccJobCacheDate.Add(time.Duration(Config.CcPollInterval)*time.Second).After(time.Now()) {
 		return nil
 	}
@@ -367,7 +367,7 @@ func ccCacheUpdate() error {
 		return fmt.Errorf("Error in JSON returned from cc-backend: %w, JSON: %s", err, body)
 	}
 
-	/* init cache if not done so yet */
+	// init cache if not done so yet
 	initial := false
 	if ccJobCache == nil {
 		ccJobCache = make(map[string]map[int64]*CacheJobState)
@@ -493,12 +493,12 @@ func ccCacheGC() {
 }
 
 func jobEventEnqueue(prepMsg []byte) error {
-	/* The message received contains a JSON, which contains all relevant
-	 * environment variables from here:
-	 * https://slurm.schedmd.com/prolog_epilog.html.
-	 * Please keep in mind that some of the environment variables are only
-	 * available in TaskProlog/TaskEpilog. However, we only run in slurmctld
-	 * context, so only their appropriate values are available. */
+	// The message received contains a JSON, which contains all relevant
+	// environment variables from here:
+	// https://slurm.schedmd.com/prolog_epilog.html.
+	// Please keep in mind that some of the environment variables are only
+	// available in TaskProlog/TaskEpilog. However, we only run in slurmctld
+	// context, so only their appropriate values are available.
 	var env PrologEpilogSlurmctldEnv
 	err := json.Unmarshal(prepMsg, &env)
 	if err != nil {
@@ -562,15 +562,15 @@ func processSlurmSacctPoll() {
 		lastRun = thisRun.Add(time.Duration(-Config.SlurmQueryMaxSpan) * time.Second)
 	}
 
-	/* Detect time change (e.g. summer/winter time). If ... */
+	// Detect time change (e.g. summer/winter time). If ...
 	_, beginOffset := lastRun.Zone()
 	_, endOffset := thisRun.Zone()
 	if endOffset < beginOffset {
-		/* If the time has gone backwards, move the begin time stamp backwards accordingly.
-		 * This way we make sure we pass a correct local time to Slurm, where 'begin'
-		 * is actually always before 'end'.
-		 * I am not entirely sure that this works reliably or if Go will correctly
-		 * handle those changes. */
+		// If the time has gone backwards, move the begin time stamp backwards accordingly.
+		// This way we make sure we pass a correct local time to Slurm, where 'begin'
+		// is actually always before 'end'.
+		// I am not entirely sure that this works reliably or if Go will correctly
+		// handle those changes.
 		trace.Warn("Time change detected: Moving last run %d seconds backwards", endOffset-beginOffset)
 		lastRun = lastRun.Add(-time.Duration(endOffset-beginOffset) * time.Second)
 	}
@@ -655,11 +655,11 @@ func daemonQuit() {
 	trace.Debug("Closing NATS")
 	natsConn.Close()
 
-	/* While we can handle orphaned pid files and sockets,
-	 * we should clean them up after we're done.
-	 * The PID check is also not 100% reliable, since we just
-	 * check against any process with that PID and not if it
-	 * actually is the daemon... */
+	// While we can handle orphaned pid files and sockets,
+	// we should clean them up after we're done.
+	// The PID check is also not 100% reliable, since we just
+	// check against any process with that PID and not if it
+	// actually is the daemon...
 	trace.Debug("Closing Socket")
 	prepSocket.Close()
 
@@ -698,7 +698,7 @@ func lastRunSet(timeStamp time.Time) {
 }
 
 func ccSyncJob(job SacctJob, force bool) error {
-	/* Assert the job exists in cc-backend. Ignore if the job already exists. */
+	// Assert the job exists in cc-backend. Ignore if the job already exists.
 	if Config.CcRestUrl == "" {
 		trace.Info("Skipping submission to ClusterCockpit REST. Missing URL. This feature is optional, so we will continue running")
 		return nil
@@ -722,10 +722,10 @@ func ccSyncJob(job SacctJob, force bool) error {
 	// In the future, this could be used to implement updating of job time limits, etc.
 	// At the moment, we can't do this yet, because cc-backend doesn't have an API endpoint to alter an existing job.
 
-	/* Only submit stop job, if it has actually finished */
+	// Only submit stop job, if it has actually finished
 	if job.Time.End.Number <= 0 {
-		/* A job which hasn't finished, has no end time set. This is easier than
-		 * comparing against all possible job states. */
+		// A job which hasn't finished, has no end time set. This is easier than
+		// comparing against all possible job states.
 		return nil
 	}
 
@@ -831,8 +831,8 @@ func ccStopJob(job SacctJob) error {
 	}
 
 	if respStop.StatusCode == 422 {
-		/* While it should usually not occur a 422 (i.e. job was already stopped),
-		 * this may still occur if something in the state was glitched. */
+		// While it should usually not occur a 422 (i.e. job was already stopped),
+		// this may still occur if something in the state was glitched.
 		trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", cluster, jobId, string(body))
 	}
 
@@ -1024,8 +1024,8 @@ func ccGet(relApiUrl string) (*http.Response, error) {
 }
 
 func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
-	/* TODO Maybe we should move this into slurm.go. We shouldn't really use slurm
-	 * datastructures outside of slurm.go. */
+	// TODO Maybe we should move this into slurm.go. We shouldn't really use slurm
+	// datastructures outside of slurm.go.
 	scJob, err := SlurmGetScontrolJob(job)
 	if err != nil {
 		return nil, err
@@ -1033,8 +1033,8 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 
 	resources, err := SlurmGetResources(job, scJob)
 	if err != nil {
-		/* This error should only occur for criticial errors.
-		 * Non critical errors won't enter this case. */
+		// This error should only occur for criticial errors.
+		// Non critical errors won't enter this case.
 		return nil, err
 	}
 
@@ -1080,8 +1080,8 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 		StartTime:    job.Time.Start.Number,
 	}
 
-	/* Determine number of CPUs and accelerators. Use requested values
-	 * as base, and use allocated values, if available. */
+	// Determine number of CPUs and accelerators. Use requested values
+	// as base, and use allocated values, if available.
 	setResources := func(tresList []SacctJobTres, ccStartJob *StartJob) {
 		for _, tres := range tresList {
 			if *tres.Type == "cpu" {
@@ -1108,8 +1108,8 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 		StopTime: job.Time.End.Number,
 	}
 
-	/* WORKAROUNDS due to cc-backend's lack of support for them.
-	 * Ideally this should be removed in the future. */
+	// WORKAROUNDS due to cc-backend's lack of support for them.
+	// Ideally this should be removed in the future.
 	if ccStopJob.State == "node_fail" {
 		trace.Warn("Altering status 'node_fail' to 'failure' for job %d. If this is finally supported in cc-backend, the code generating this message can be removed", *job.JobId)
 		ccStopJob.State = "failure"
@@ -1123,8 +1123,8 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 }
 
 func checkIgnoreJob(job SacctJob, startJobData *StartJob) bool {
-	/* We may want to filter out certain jobs, that shall not be submitted to cc-backend.
-	 * Put more rules here if necessary. */
+	// We may want to filter out certain jobs, that shall not be submitted to cc-backend.
+	// Put more rules here if necessary.
 	trace.Debug("Checking whether job %d should be ignored", *job.JobId)
 
 	if len(startJobData.Resources) == 0 {
@@ -1138,14 +1138,14 @@ func checkIgnoreJob(job SacctJob, startJobData *StartJob) bool {
 		return true
 	}
 
-	/* If all hosts used in this job don't match the ignore pattern, discard the job.
-	 * Accordingly, if at least one host of the job does not match the pattern, the job
-	 * is not discarded. */
+	// If all hosts used in this job don't match the ignore pattern, discard the job.
+	// Accordingly, if at least one host of the job does not match the pattern, the job
+	// is not discarded.
 	if len(Config.IgnoreHosts) > 0 {
 		trace.Debug("Checking job %d against ignore hosts list.", *job.JobId)
 		atLeastOneHostAllowed := false
 		for _, r := range startJobData.Resources {
-			/* The validity of the regexp is checked on startup, so no need to check it here. */
+			// The validity of the regexp is checked on startup, so no need to check it here.
 			match, _ := regexp.MatchString(Config.IgnoreHosts, r.Hostname)
 			if !match {
 				atLeastOneHostAllowed = true

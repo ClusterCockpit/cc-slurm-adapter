@@ -11,10 +11,10 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
 
-/* The following struct *should* contain all environment variables set in the
- * Slurmctld Prologue/Epilogue. See here for the full list:
- * https://slurm.schedmd.com/prolog_epilog.html
- * This may change in Slurm version > 24.11 */
+// The following struct *should* contain all environment variables set in the
+// Slurmctld Prologue/Epilogue. See here for the full list:
+// https://slurm.schedmd.com/prolog_epilog.html
+// This may change in Slurm version > 24.11
 type PrologEpilogSlurmctldEnv struct {
 	CUDA_MPS_ACTIVE_THREAD_PERCENTAGE string `json:"CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"`
 	CUDA_VISIBLE_DEVICES              string `json:"CUDA_VISIBLE_DEVICES"`
@@ -60,11 +60,11 @@ type PrologEpilogSlurmctldEnv struct {
 }
 
 func CollectEnvironmentValues() (PrologEpilogSlurmctldEnv, error) {
-	/* Collect all interesting envinroment variables from Slurm and pack them into a struct.
-	 * If you need to change any of the enivonrment variables, simply add them to the struct above.
-	 * The code below will automatically read the appropriate environment variables.
-	 * While Prolog and Epilog use a slightly different set of environment variables, we can
-	 * query all of them in both cases. If they are not set, they will simply stay blank, which is okay. */
+	// Collect all interesting envinroment variables from Slurm and pack them into a struct.
+	// If you need to change any of the enivonrment variables, simply add them to the struct above.
+	// The code below will automatically read the appropriate environment variables.
+	// While Prolog and Epilog use a slightly different set of environment variables, we can
+	// query all of them in both cases. If they are not set, they will simply stay blank, which is okay.
 
 	var retval PrologEpilogSlurmctldEnv
 

@@ -16,26 +16,23 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
 
-/* SlurmInt supports these two JSON layouts:
- * - 42
- * - { "set": true, "infinite": false, "number": 42 }
- */
+// SlurmInt supports these two JSON layouts:
+// - 42
+// - { "set": true, "infinite": false, "number": 42 }
 type SlurmInt struct {
 	Set      bool  `json:"set"`
 	Infinite bool  `json:"infinite"`
 	Number   int64 `json:"number"`
 }
 
-/* SlurmString supports these two JSON layouts:
- * - "myString"
- * - [ "myString" ]
- */
+// SlurmString supports these two JSON layouts:
+// - "myString"
+// - [ "myString" ]
 type SlurmString string
 
-/* SlurmIntString supports those two JSON layouts:
- * - "123"
- * - 123
- */
+// SlurmIntString supports those two JSON layouts:
+// - "123"
+// - 123
 type SlurmIntString string
 
 type ScontrolJobResourcesNodesAllocationSocketCore struct {
@@ -65,7 +62,7 @@ type ScontrolJobResources struct {
 }
 
 type ScontrolJob struct {
-	/* Only (our) required fields are listed here. */
+	// Only (our) required fields are listed here.
 	JobId        *uint32               `json:"job_id"`
 	JobResources *ScontrolJobResources `json:"job_resources"`
 	JobState     *SlurmString          `json:"job_state"`
@@ -86,7 +83,7 @@ type SacctJobState struct {
 }
 
 type SacctJobArray struct {
-	/* Only (our) required fields are listed here. */
+	// Only (our) required fields are listed here.
 	JobId *uint32 `json:"job_id"`
 }
 
@@ -135,7 +132,7 @@ type SacctJobTresList struct {
 }
 
 type SacctJob struct {
-	/* Only (our) required fields are listed here. */
+	// Only (our) required fields are listed here.
 	Account         *string           `json:"account"`
 	AllocationNodes *SlurmInt         `json:"allocation_nodes"`
 	Array           *SacctJobArray    `json:"array"`
@@ -159,7 +156,7 @@ type SacctJobRequired struct {
 }
 
 type SacctJobTime struct {
-	/* Only (our) required fields are listed here. */
+	// Only (our) required fields are listed here.
 	Elapsed    SlurmInt `json:"elapsed"`
 	End        SlurmInt `json:"end"`
 	Limit      SlurmInt `json:"limit"`
@@ -180,12 +177,12 @@ type SlurmMetaSlurm struct {
 }
 
 type SlurmMeta struct {
-	/* Only (our) required fields are listed here. */
+	// Only (our) required fields are listed here.
 	Slurm SlurmMetaSlurm `json:"slurm"`
 }
 
 type SacctResult struct {
-	/* Only (our) required fields are listed here. */
+	// Only (our) required fields are listed here.
 	Jobs []SacctJob `json:"jobs"`
 	Meta SlurmMeta  `json:"meta"`
 }
@@ -268,11 +265,11 @@ var (
 )
 
 func (v *SlurmInt) UnmarshalJSON(data []byte) error {
-	/* Slurm at some point has changed the representation of integers in its API.
-	 * Unfortuantely the usage is somewhat mixed, so we use a custom integer type
-	 * with our own Unmarshal and Marshal functions. That way we can automatically
-	 * switch between the two variants and simply use "SlurmInt" as type in the structs
-	 * regardless of the Slurm version used. */
+	// Slurm at some point has changed the representation of integers in its API.
+	// Unfortuantely the usage is somewhat mixed, so we use a custom integer type
+	// with our own Unmarshal and Marshal functions. That way we can automatically
+	// switch between the two variants and simply use "SlurmInt" as type in the structs
+	// regardless of the Slurm version used.
 	result := struct {
 		Set      *bool  `json:"set"`
 		Infinite *bool  `json:"infinite"`
@@ -304,8 +301,8 @@ func (v *SlurmInt) UnmarshalJSON(data []byte) error {
 }
 
 func (v *SlurmString) UnmarshalJSON(data []byte) error {
-	/* Slurm at some point wrapped strings in a list with just one string.
-	 * No idea why. */
+	// Slurm at some point wrapped strings in a list with just one string.
+	// No idea why.
 	var result []string
 	err := json.Unmarshal(data, &result)
 	if err == nil {
@@ -322,8 +319,8 @@ func (v *SlurmString) UnmarshalJSON(data []byte) error {
 }
 
 func (v *SlurmIntString) UnmarshalJSON(data []byte) error {
-	/* Slurm changed the usage of int to strings from v23 to v24 in its version field.
-	 * So allow this type to be parsed both ways. */
+	// Slurm changed the usage of int to strings from v23 to v24 in its version field.
+	// So allow this type to be parsed both ways.
 	var resultStr string
 	err := json.Unmarshal(data, &resultStr)
 	if err == nil {
@@ -486,20 +483,20 @@ func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
 }
 
 func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, error) {
-	/* This function fetches additional information about a Slurm job via scontrol.
-	 * Unfortunately some of the information is not available via sacct, so we need
-	 * scontrol to get this information. Because this information is not stored
-	 * in the slurmdbd, we have to query this within a few minutes after a job has
-	 * terminated at last.
-	 * If this fetching fails, we cannot populate allocated resources. This is not
-	 * critical to the operation of cc-backend, but it means certains graphs won't be
-	 * available, since metrics won't be assignable to a job anymore. */
+	// This function fetches additional information about a Slurm job via scontrol.
+	// Unfortunately some of the information is not available via sacct, so we need
+	// scontrol to get this information. Because this information is not stored
+	// in the slurmdbd, we have to query this within a few minutes after a job has
+	// terminated at last.
+	// If this fetching fails, we cannot populate allocated resources. This is not
+	// critical to the operation of cc-backend, but it means certains graphs won't be
+	// available, since metrics won't be assignable to a job anymore.
 
-	/* Create schema.Resources out of the ScontrolResult */
+	// Create schema.Resources out of the ScontrolResult
 	if scJob == nil {
-		/* If no jobs are returned, this is most likely because the job has already ended some time ago.
-		 * There is nothing we can do about this, so try to obtain hostnames
-		 * and continue without hwthread information. */
+		// If no jobs are returned, this is most likely because the job has already ended some time ago.
+		// There is nothing we can do about this, so try to obtain hostnames
+		// and continue without hwthread information.
 		nodes, err := SlurmGetNodes(saJob)
 		if err != nil {
 			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", *saJob.JobId, err)
@@ -513,9 +510,9 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 	}
 
 	if scJob.JobResources == nil || scJob.JobResources.Nodes == nil {
-		/* If Resources is nil, then the job probably just hasn't started yet.
-		 * we can safely return an empty list, since this job will be discarded
-		 * later either way. */
+		// If Resources is nil, then the job probably just hasn't started yet.
+		// we can safely return an empty list, since this job will be discarded
+		// later either way.
 		trace.Debug("Job (%s, %d) has scontrol info available, but no resources", *saJob.Cluster, *saJob.JobId)
 		return make([]*schema.Resource, 0), nil
 	}
@@ -523,7 +520,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 	scAllocation := scJob.JobResources.Nodes.Allocation
 	resources := make([]*schema.Resource, 0)
 	for _, allocation := range scAllocation {
-		/* Determine Hwthreads */
+		// Determine Hwthreads
 		hwthreads := make([]int, 0)
 		cpusPerSocket := len(allocation.Sockets[0].Cores)
 		for _, socket := range allocation.Sockets {
@@ -535,9 +532,9 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 			}
 		}
 
-		/* Determine accelerators. We prefer to get the information via Config + GresDetail.
-		 * Though, for legacy we also support parsing the comment field.
-		 * The latter one requires manual intervention by the Slurm Administrators. */
+		// Determine accelerators. We prefer to get the information via Config + GresDetail.
+		// Though, for legacy we also support parsing the comment field.
+		// The latter one requires manual intervention by the Slurm Administrators.
 		var accelerators []string
 		if *allocation.Index < len(scJob.GresDetail) {
 			trace.Debug("Detecting GPU via gres")
@@ -545,7 +542,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 			if err == nil && nodeGres.Variant == "gpu" {
 				found := false
 				for hostRegex, pciAddrList := range Config.GpuPciAddrs {
-					/* We initially check the regex, so no need to check for errors again. */
+					// We initially check the regex, so no need to check for errors again.
 					match, _ := regexp.MatchString(hostRegex, *allocation.Hostname)
 					if match {
 						for _, v := range nodeGres.DomainIndices {
@@ -569,7 +566,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 			accelerators = strings.Split(*scJob.Comment, ",")
 		}
 
-		/* Create final result */
+		// Create final result
 		r := schema.Resource{
 			Hostname:     *allocation.Hostname,
 			HWThreads:    hwthreads,
@@ -583,8 +580,8 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 
 func SlurmGetNodes(job SacctJob) ([]string, error) {
 	if strings.ToLower(*job.Nodes) == "none assigned" {
-		/* Jobs, which have been cancelled before being scheduled, won't have any
-		 * hostnames listed. Return an empty list in this case. */
+		// Jobs, which have been cancelled before being scheduled, won't have any
+		// hostnames listed. Return an empty list in this case.
 		return make([]string, 0), nil
 	}
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "hostnames", *job.Nodes)
@@ -598,8 +595,8 @@ func SlurmGetNodes(job SacctJob) ([]string, error) {
 func SlurmGetJobInfoText(job SacctJob) string {
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId))
 	if err != nil {
-		/* If query fails, this is most likely because the job has already ended some time ago.
-		 * There is nothing we can do about this, so continue with just a warning. */
+		// If query fails, this is most likely because the job has already ended some time ago.
+		// There is nothing we can do about this, so continue with just a warning.
 		return fmt.Sprintf("Error while getting job information for JobID=%d", *job.JobId)
 	}
 
@@ -614,8 +611,8 @@ func SlurmGetJobInfoText(job SacctJob) string {
 func SlurmGetJobScript(job SacctJob) string {
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "write", "batch_script", fmt.Sprintf("%d", *job.JobId), "-")
 	if err != nil {
-		/* If the job has ended some time ago, this will fail.
-		 * However, this is not a critical case, so just return an empty job script. */
+		// If the job has ended some time ago, this will fail.
+		// However, this is not a critical case, so just return an empty job script.
 		return ""
 	}
 	return stdout
@@ -636,8 +633,8 @@ func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
 func SlurmCheckPerms() {
 	trace.Debug("SlurmCheckPerms()")
 
-	/* This function checks, whether we are a Slurm operator. Issue a warning
-	 * if we are not. */
+	// This function checks, whether we are a Slurm operator. Issue a warning
+	// if we are not.
 	userObj, err := user.Current()
 	if err != nil {
 		trace.Fatal("Unable to retrieve current user name: %s", err)
