@@ -19,6 +19,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/prep"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
+
 	"github.com/ClusterCockpit/cc-lib/ccMessage"
 	"github.com/ClusterCockpit/cc-lib/schema"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
@@ -46,7 +50,7 @@ var (
 	prepSocket net.Listener
 	httpClient http.Client
 	natsConn   *nats.Conn
-	jobEvents  []PrologEpilogSlurmctldEnv
+	jobEvents  []prep.SlurmctldEnv
 	hostname   string
 	// map['clusterName'] -> map[slurmId] -> CC Job State, which are currently running (or ran recently).
 	// When a jobs is started, they are inserted into the map. When they are stopped
@@ -78,9 +82,9 @@ func DaemonMain() error {
 	prepSocketChan := make(chan []byte, 1024)
 	go prepSocketListenRoutine(signalCtx, prepSocketChan)
 
-	queryDelay := time.Duration(Config.SlurmQueryDelay) * time.Second
+	queryDelay := time.Duration(config.Config.SlurmQueryDelay) * time.Second
 
-	pollEventInterval := time.Duration(Config.SlurmPollInterval) * time.Second
+	pollEventInterval := time.Duration(config.Config.SlurmPollInterval) * time.Second
 	pollEventTicker := time.NewTicker(queryDelay)
 	pollEventFirst := true
 
@@ -129,7 +133,7 @@ func DaemonMain() error {
 			}
 		case <-jobEventTimer.C:
 			trace.Info("Job Event timer triggered")
-			SlurmSacctCacheClear()
+			slurm.SacctCacheClear()
 			jobEventsProcess()
 			if len(jobEvents) > 0 {
 				jobEventTimer.Reset(queryDelay)
@@ -145,7 +149,7 @@ func DaemonMain() error {
 				pollEventTicker.Reset(pollEventInterval)
 			}
 
-			SlurmSacctCacheClear()
+			slurm.SacctCacheClear()
 			err = ccCacheUpdate()
 			if err != nil {
 				trace.Error("Unable to update cc-backend cache. Trying later...")
@@ -205,7 +209,7 @@ func daemonInit() error {
 	lastRunSet(lastRunGet())
 
 	// Verify Slurm Permissions
-	SlurmCheckPerms()
+	slurm.CheckPerms()
 
 	// Init Unix Socket
 	trace.Debug("Opening Socket")
@@ -215,7 +219,7 @@ func daemonInit() error {
 	// If it is still running, raise an error. If it is not running,
 	// the pid file is orphaned, and can be deleted. If no pid file exists
 	// we can safely start the daemon immediately.
-	pidFileContent, err := os.ReadFile(Config.PidFilePath)
+	pidFileContent, err := os.ReadFile(config.Config.PidFilePath)
 	if err == nil {
 		trimmedPidFileContent := strings.TrimSpace(string(pidFileContent))
 		_, err := os.Stat(fmt.Sprintf("/proc/%s", trimmedPidFileContent))
@@ -224,19 +228,19 @@ func daemonInit() error {
 		}
 	}
 
-	err = os.WriteFile(Config.PidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	err = os.WriteFile(config.Config.PidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
 	if err != nil {
 		return fmt.Errorf("Unable to create pid file: %w", err)
 	}
 
-	sockType, sockAddr := GetProtoAddr(Config.PrepSockListenPath)
+	sockType, sockAddr := config.GetProtoAddr(config.Config.PrepSockListenPath)
 	if sockType == "unix" {
 		os.Remove(sockAddr)
 	}
 
 	prepSocket, err = net.Listen(sockType, sockAddr)
 	if err != nil {
-		os.Remove(Config.PidFilePath)
+		os.Remove(config.Config.PidFilePath)
 		return fmt.Errorf("Unable to create socket (is there an existing socket with bad permissions?): %w", err)
 	}
 
@@ -247,7 +251,7 @@ func daemonInit() error {
 		if err != nil {
 			prepSocket.Close()
 			os.Remove(sockAddr)
-			os.Remove(Config.PidFilePath)
+			os.Remove(config.Config.PidFilePath)
 			return fmt.Errorf("Failed to set permissions via chmod on PrEp Socket: %w", err)
 		}
 	}
@@ -255,27 +259,27 @@ func daemonInit() error {
 	// Init HTTP Client
 	tr := &http.Transport{
 		MaxIdleConns:    10,
-		IdleConnTimeout: 2 * time.Duration(Config.SlurmPollInterval) * time.Second,
+		IdleConnTimeout: 2 * time.Duration(config.Config.SlurmPollInterval) * time.Second,
 	}
 	httpClient = http.Client{Transport: tr}
 
 	// Init NATS Client
 	options := make([]nats.Option, 0)
-	if len(Config.NatsUser) > 0 {
-		options = append(options, nats.UserInfo(Config.NatsUser, Config.NatsPassword))
+	if len(config.Config.NatsUser) > 0 {
+		options = append(options, nats.UserInfo(config.Config.NatsUser, config.Config.NatsPassword))
 	}
-	if len(Config.NatsCredsFile) > 0 {
-		options = append(options, nats.UserCredentials(Config.NatsCredsFile))
+	if len(config.Config.NatsCredsFile) > 0 {
+		options = append(options, nats.UserCredentials(config.Config.NatsCredsFile))
 	}
-	if len(Config.NatsNKeySeedFile) > 0 {
-		r, err := nats.NkeyOptionFromSeed(Config.NatsNKeySeedFile)
+	if len(config.Config.NatsNKeySeedFile) > 0 {
+		r, err := nats.NkeyOptionFromSeed(config.Config.NatsNKeySeedFile)
 		if err != nil {
 			return fmt.Errorf("Unable to open NKeySeedFile: %w", err)
 		}
 		options = append(options, r)
 	}
-	if len(Config.NatsServer) > 0 {
-		natsAddr := fmt.Sprintf("nats://%s:%d", Config.NatsServer, Config.NatsPort)
+	if len(config.Config.NatsServer) > 0 {
+		natsAddr := fmt.Sprintf("nats://%s:%d", config.Config.NatsServer, config.Config.NatsPort)
 		trace.Info("Connecting to NATS: %s", natsAddr)
 		natsConn, err = nats.Connect(natsAddr, options...)
 		if err != nil {
@@ -283,16 +287,16 @@ func daemonInit() error {
 			if sockType == "unix" {
 				os.Remove(sockAddr)
 			}
-			os.Remove(Config.PidFilePath)
+			os.Remove(config.Config.PidFilePath)
 			return fmt.Errorf("Unable to connect to NATS (server: %s): %w", natsAddr, err)
 		}
 	}
 
 	// job events queue initialization
-	jobEvents = make([]PrologEpilogSlurmctldEnv, 0)
+	jobEvents = make([]prep.SlurmctldEnv, 0)
 
 	// Get the clusters managed by Slurm
-	slurmClusters, err = SlurmGetClusterNames()
+	slurmClusters, err = slurm.GetClusterNames()
 	if err != nil {
 		return fmt.Errorf("Unable to determine cluster hostnames: %w", err)
 	}
@@ -336,7 +340,7 @@ func printWelcome() {
 func ccCacheUpdate() error {
 	// We maintain a local cache of which jobs are marked as running in cc-backend.
 	// Only refresh it if the cache was invalidated or if it wasn't refreshed for some time.
-	if ccJobCacheValid && ccJobCacheDate.Add(time.Duration(Config.CcPollInterval)*time.Second).After(time.Now()) {
+	if ccJobCacheValid && ccJobCacheDate.Add(time.Duration(config.Config.CcPollInterval)*time.Second).After(time.Now()) {
 		return nil
 	}
 
@@ -419,7 +423,7 @@ func ccCacheUpdate() error {
 				trace.Warn("Cache desync detected! Fetching running job (%s, %d) from cc-backend to cache.", ccJob.Cluster, ccJob.JobID)
 			}
 
-			slurmJob, err := SlurmQueryJob(ccJob.Cluster, uint32(ccJob.JobID))
+			slurmJob, err := slurm.QueryJob(ccJob.Cluster, uint32(ccJob.JobID))
 			if err != nil {
 				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", ccJob.Cluster, ccJob.JobID, err)
 				continue
@@ -453,7 +457,7 @@ func ccCacheUpdate() error {
 				trace.Warn("Cache desync detected! Resetting missing/stopped job (%s, %d) from cc-backend in cache.", cluster, jobId)
 			}
 
-			slurmJob, err := SlurmQueryJob(cluster, uint32(jobId))
+			slurmJob, err := slurm.QueryJob(cluster, uint32(jobId))
 			if err != nil {
 				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", cluster, jobId, err)
 				continue
@@ -499,7 +503,7 @@ func jobEventEnqueue(prepMsg []byte) error {
 	// Please keep in mind that some of the environment variables are only
 	// available in TaskProlog/TaskEpilog. However, we only run in slurmctld
 	// context, so only their appropriate values are available.
-	var env PrologEpilogSlurmctldEnv
+	var env prep.SlurmctldEnv
 	err := json.Unmarshal(prepMsg, &env)
 	if err != nil {
 		return fmt.Errorf("Unable to parse PrEp message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in our IPC protocol: '%s'", err, string(prepMsg))
@@ -513,7 +517,7 @@ func jobEventEnqueue(prepMsg []byte) error {
 
 func jobEventsProcess() {
 	trace.Debug("jobEventsProcess()")
-	newJobEvents := make([]PrologEpilogSlurmctldEnv, 0)
+	newJobEvents := make([]prep.SlurmctldEnv, 0)
 	for index, jobEvent := range jobEvents {
 		jobEventId, err := strconv.ParseUint(jobEvent.SLURM_JOB_ID, 10, 32)
 		if err != nil {
@@ -527,7 +531,7 @@ func jobEventsProcess() {
 			continue
 		}
 
-		job, err := SlurmQueryJob(jobEventCluster, uint32(jobEventId))
+		job, err := slurm.QueryJob(jobEventCluster, uint32(jobEventId))
 		if err != nil {
 			// We want to avoid job events getting delivered out of order.
 			// Accordingly, cancel the execution of the loop if there is an error.
@@ -538,7 +542,7 @@ func jobEventsProcess() {
 				newJobEvents = append(newJobEvents, jobEvents[index:]...)
 				break
 			} else {
-				trace.Warn("Job (%d) exceeded max query retries of %d. Giving up on job.", jobEventId, Config.SlurmMaxRetries)
+				trace.Warn("Job (%d) exceeded max query retries of %d. Giving up on job.", jobEventId, config.Config.SlurmMaxRetries)
 				continue
 			}
 		}
@@ -557,9 +561,9 @@ func processSlurmSacctPoll() {
 	lastRun := lastRunGet().Add(time.Duration(-1 * time.Second)) // -1 second for good measure to avoid overlap error
 	thisRun := time.Now()
 
-	if lastRun.Add(time.Duration(Config.SlurmQueryMaxSpan) * time.Second).Before(thisRun) {
-		trace.Warn("sacct was polled %s ago, which is higher than maximum %d. Limiting to maximum. Either we didn't run for a while or haven't run at all. If jobs from the past are missing, increase the maxmimum duration in the configuration. This warning will go away after the next job.", thisRun.Sub(lastRun).Truncate(time.Second).String(), Config.SlurmQueryMaxSpan)
-		lastRun = thisRun.Add(time.Duration(-Config.SlurmQueryMaxSpan) * time.Second)
+	if lastRun.Add(time.Duration(config.Config.SlurmQueryMaxSpan) * time.Second).Before(thisRun) {
+		trace.Warn("sacct was polled %s ago, which is higher than maximum %d. Limiting to maximum. Either we didn't run for a while or haven't run at all. If jobs from the past are missing, increase the maxmimum duration in the configuration. This warning will go away after the next job.", thisRun.Sub(lastRun).Truncate(time.Second).String(), config.Config.SlurmQueryMaxSpan)
+		lastRun = thisRun.Add(time.Duration(-config.Config.SlurmQueryMaxSpan) * time.Second)
 	}
 
 	// Detect time change (e.g. summer/winter time). If ...
@@ -576,7 +580,7 @@ func processSlurmSacctPoll() {
 	}
 
 	for _, cluster := range slurmClusters {
-		jobs, err := SlurmQueryJobsTimeRange(cluster, lastRun, thisRun)
+		jobs, err := slurm.QueryJobsTimeRange(cluster, lastRun, thisRun)
 		if err != nil {
 			trace.Error("Unable to query Slurm for jobs (is Slurm available?): %s", err)
 			return
@@ -600,7 +604,7 @@ func processSlurmSacctPoll() {
 func processSlurmSqueuePoll() {
 	trace.Debug("processSlurmSqueuePoll()")
 	for _, cluster := range slurmClusters {
-		jobs, err := SlurmQueryJobsActive(cluster)
+		jobs, err := slurm.QueryJobsActive(cluster)
 		if err != nil {
 			trace.Error("Unable to query Slurm via squeue (is Slurm available?): %v", err)
 			return
@@ -635,7 +639,7 @@ func processSlurmSqueuePoll() {
 			}
 
 			trace.Warn("Detected stale job in cc-backend (%s, %d). Trying to synchronize...", cluster, jobId)
-			job, err := SlurmQueryJob(cluster, uint32(jobId))
+			job, err := slurm.QueryJob(cluster, uint32(jobId))
 			if err != nil {
 				trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
 				continue
@@ -663,15 +667,15 @@ func daemonQuit() {
 	trace.Debug("Closing Socket")
 	prepSocket.Close()
 
-	sockType, sockAddr := GetProtoAddr(Config.PrepSockListenPath)
+	sockType, sockAddr := config.GetProtoAddr(config.Config.PrepSockListenPath)
 	if sockType == "unix" {
 		os.Remove(sockAddr)
 	}
-	os.Remove(Config.PidFilePath)
+	os.Remove(config.Config.PidFilePath)
 }
 
 func lastRunGet() time.Time {
-	statInfo, err := os.Stat(Config.LastRunPath)
+	statInfo, err := os.Stat(config.Config.LastRunPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return time.Unix(0, 0)
 	}
@@ -684,22 +688,22 @@ func lastRunGet() time.Time {
 
 func lastRunSet(timeStamp time.Time) {
 	trace.Debug("lastRunSet")
-	f, err := os.OpenFile(Config.LastRunPath, os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(config.Config.LastRunPath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		trace.Fatal("Unable to set time of last run: %s", err)
 	}
 
 	f.Close()
 
-	err = os.Chtimes(Config.LastRunPath, timeStamp, timeStamp)
+	err = os.Chtimes(config.Config.LastRunPath, timeStamp, timeStamp)
 	if err != nil {
 		trace.Fatal("Unable to set time of last run: %s", err)
 	}
 }
 
-func ccSyncJob(job SacctJob, force bool) error {
+func ccSyncJob(job slurm.SacctJob, force bool) error {
 	// Assert the job exists in cc-backend. Ignore if the job already exists.
-	if Config.CcRestUrl == "" {
+	if config.Config.CcRestUrl == "" {
 		trace.Info("Skipping submission to ClusterCockpit REST. Missing URL. This feature is optional, so we will continue running")
 		return nil
 	}
@@ -738,7 +742,7 @@ func ccSyncJob(job SacctJob, force bool) error {
 	return nil
 }
 
-func ccStartJob(job SacctJob, startJobData *StartJob) error {
+func ccStartJob(job slurm.SacctJob, startJobData *StartJob) error {
 	cluster := *job.Cluster
 	jobId := int64(*job.JobId)
 
@@ -782,7 +786,7 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 		if err != nil {
 			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
-			err = natsConn.Publish(Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			err = natsConn.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
 			if err != nil {
 				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}
@@ -800,7 +804,7 @@ func ccStartJob(job SacctJob, startJobData *StartJob) error {
 	return nil
 }
 
-func ccStopJob(job SacctJob) error {
+func ccStopJob(job slurm.SacctJob) error {
 	cluster := *job.Cluster
 	jobId := int64(*job.JobId)
 
@@ -848,7 +852,7 @@ func ccStopJob(job SacctJob) error {
 		if err != nil {
 			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
-			err = natsConn.Publish(Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			err = natsConn.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
 			if err != nil {
 				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}
@@ -872,7 +876,7 @@ func ccSyncStats() error {
 
 	for _, cluster := range slurmClusters {
 		// Create a list of nodes and the jobs that are running on those
-		jobs, err := SlurmQueryJobsActive(cluster)
+		jobs, err := slurm.QueryJobsActive(cluster)
 		if err != nil {
 			trace.Error("Unable to query Slurm via squeue (is Slurm available?)")
 			break
@@ -893,7 +897,7 @@ func ccSyncStats() error {
 		}
 
 		// Obtain various cluster stats like used CPUs, GPUs, etc.
-		stats, err := SlurmGetClusterStats(cluster)
+		stats, err := slurm.GetClusterStats(cluster)
 		if err != nil {
 			trace.Error("Unable to sync Slurm stats to cc-backend: %v", err)
 			continue
@@ -939,8 +943,8 @@ func ccSyncStats() error {
 				node.MemoryAllocated = *stat.Memory.Allocated
 				node.MemoryTotal = *stat.Memory.Maximum
 				// Neither is GRES
-				gresTotal, errTotal := SlurmParseGRES(*stat.Gres.Total)
-				gresAlloc, errAlloc := SlurmParseGRES(*stat.Gres.Used)
+				gresTotal, errTotal := slurm.ParseGRES(*stat.Gres.Total)
+				gresAlloc, errAlloc := slurm.ParseGRES(*stat.Gres.Used)
 				if errTotal == nil && errAlloc == nil {
 					node.GpusTotal = int(gresTotal.Count)
 					node.GpusAllocated = int(gresAlloc.Count)
@@ -995,7 +999,7 @@ func ccSyncStats() error {
 func ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
 	trace.Debug("POST to function %s: %s", relApiUrl, string(bodyJson))
 
-	url := fmt.Sprintf("%s/api%s", Config.CcRestUrl, relApiUrl)
+	url := fmt.Sprintf("%s/api%s", config.Config.CcRestUrl, relApiUrl)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJson))
 	if err != nil {
 		return nil, err
@@ -1003,13 +1007,13 @@ func ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
 
 	req.Header.Set("accept", "application/ld+json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-AUTH-TOKEN", Config.CcRestJwt)
+	req.Header.Set("X-AUTH-TOKEN", config.Config.CcRestJwt)
 
 	return httpClient.Do(req)
 }
 
 func ccGet(relApiUrl string) (*http.Response, error) {
-	url := fmt.Sprintf("%s/api%s", Config.CcRestUrl, relApiUrl)
+	url := fmt.Sprintf("%s/api%s", config.Config.CcRestUrl, relApiUrl)
 	trace.Debug("GET to function %s", relApiUrl)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -1018,20 +1022,20 @@ func ccGet(relApiUrl string) (*http.Response, error) {
 
 	req.Header.Set("accept", "application/ld+json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-AUTH-TOKEN", Config.CcRestJwt)
+	req.Header.Set("X-AUTH-TOKEN", config.Config.CcRestJwt)
 
 	return httpClient.Do(req)
 }
 
-func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
+func slurmJobToCcStartJob(job slurm.SacctJob) (*StartJob, error) {
 	// TODO Maybe we should move this into slurm.go. We shouldn't really use slurm
 	// datastructures outside of slurm.go.
-	scJob, err := SlurmGetScontrolJob(job)
+	scJob, err := slurm.GetScontrolJob(job)
 	if err != nil {
 		return nil, err
 	}
 
-	resources, err := SlurmGetResources(job, scJob)
+	resources, err := slurm.GetResources(job, scJob)
 	if err != nil {
 		// This error should only occur for criticial errors.
 		// Non critical errors won't enter this case.
@@ -1039,12 +1043,12 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	}
 
 	metaData := make(map[string]string)
-	jobScript := SlurmGetJobScript(job)
+	jobScript := slurm.GetJobScript(job)
 	if jobScript != "" {
 		metaData["jobScript"] = jobScript
 	}
 	metaData["jobName"] = *job.Name
-	metaData["slurmInfo"] = SlurmGetJobInfoText(job)
+	metaData["slurmInfo"] = slurm.GetJobInfoText(job)
 	metaData["submitTime"] = fmt.Sprintf("%v", job.Time.Submission.Number)
 
 	var exclusive int32
@@ -1082,7 +1086,7 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 
 	// Determine number of CPUs and accelerators. Use requested values
 	// as base, and use allocated values, if available.
-	setResources := func(tresList []SacctJobTres, ccStartJob *StartJob) {
+	setResources := func(tresList []slurm.SacctJobTres, ccStartJob *StartJob) {
 		for _, tres := range tresList {
 			if *tres.Type == "cpu" {
 				ccStartJob.NumHWThreads = int32(*tres.Count)
@@ -1100,7 +1104,7 @@ func slurmJobToCcStartJob(job SacctJob) (*StartJob, error) {
 	return &ccStartJob, nil
 }
 
-func slurmJobToCcStopJob(job SacctJob) StopJob {
+func slurmJobToCcStopJob(job slurm.SacctJob) StopJob {
 	ccStopJob := StopJob{
 		JobId:    *job.JobId,
 		Cluster:  *job.Cluster,
@@ -1122,7 +1126,7 @@ func slurmJobToCcStopJob(job SacctJob) StopJob {
 	return ccStopJob
 }
 
-func checkIgnoreJob(job SacctJob, startJobData *StartJob) bool {
+func checkIgnoreJob(job slurm.SacctJob, startJobData *StartJob) bool {
 	// We may want to filter out certain jobs, that shall not be submitted to cc-backend.
 	// Put more rules here if necessary.
 	trace.Debug("Checking whether job %d should be ignored", *job.JobId)
@@ -1141,12 +1145,12 @@ func checkIgnoreJob(job SacctJob, startJobData *StartJob) bool {
 	// If all hosts used in this job don't match the ignore pattern, discard the job.
 	// Accordingly, if at least one host of the job does not match the pattern, the job
 	// is not discarded.
-	if len(Config.IgnoreHosts) > 0 {
+	if len(config.Config.IgnoreHosts) > 0 {
 		trace.Debug("Checking job %d against ignore hosts list.", *job.JobId)
 		atLeastOneHostAllowed := false
 		for _, r := range startJobData.Resources {
 			// The validity of the regexp is checked on startup, so no need to check it here.
-			match, _ := regexp.MatchString(Config.IgnoreHosts, r.Hostname)
+			match, _ := regexp.MatchString(config.Config.IgnoreHosts, r.Hostname)
 			if !match {
 				atLeastOneHostAllowed = true
 				break

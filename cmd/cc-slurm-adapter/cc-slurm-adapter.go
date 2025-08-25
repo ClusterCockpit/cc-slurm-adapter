@@ -4,6 +4,8 @@ import (
 	"flag"
 	"os"
 
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/prep"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
 
@@ -23,7 +25,7 @@ func main() {
 	flag.Parse()
 
 	trace.SetLevel(debugLevel)
-	LoadConfig(configPath)
+	config.Load(configPath)
 
 	var err error
 	var mode string
@@ -36,7 +38,7 @@ func main() {
 		err = DaemonMain()
 	} else {
 		mode = "Prolog/Epilog"
-		err = PrologEpilogMain()
+		err = prep.Main()
 	}
 
 	if err != nil {

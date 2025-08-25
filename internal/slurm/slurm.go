@@ -1,4 +1,4 @@
-package main
+package slurm
 
 import (
 	"bytes"
@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
 
 	"github.com/ClusterCockpit/cc-lib/schema"
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
@@ -337,7 +339,7 @@ func (v *SlurmIntString) UnmarshalJSON(data []byte) error {
 	return err
 }
 
-func SlurmGetClusterNames() ([]string, error) {
+func GetClusterNames() ([]string, error) {
 	stdout, err := callProcess("sacctmgr", "list", "clusters", "--noheader", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacctmgr to obtain cluster names: %w", err)
@@ -361,7 +363,7 @@ func SlurmGetClusterNames() ([]string, error) {
 	return clusterNames, nil
 }
 
-func SlurmSacctCacheClear() {
+func SacctCacheClear() {
 	trace.Debug("Clearing Slurm sacct cache")
 	sacctCache = make(map[string]map[uint32]*SacctJob)
 }
@@ -376,7 +378,7 @@ func slurmSacctCacheAdd(job *SacctJob) {
 	sacctCache[*job.Cluster][*job.JobId] = job
 }
 
-func SlurmQueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
+func QueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 	if sacctCache[clusterName] != nil && sacctCache[clusterName][jobId] != nil {
 		trace.Debug("Job (%s, %d) already in cache, skipping 'sacct'", clusterName, jobId)
 		return sacctCache[clusterName][jobId], nil
@@ -395,7 +397,7 @@ func SlurmQueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	SlurmWarnVersion(result.Meta.Slurm.Version)
+	WarnVersion(result.Meta.Slurm.Version)
 
 	// When a job ID is queried, which is part of an array job, all jobs related to this array job are returned.
 	// Find the one that we actually want.
@@ -411,7 +413,7 @@ func SlurmQueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 	return nil, fmt.Errorf("Requested job (%s, %d) returned jobs, but none with our job ID: %+v", clusterName, jobId, result.Jobs)
 }
 
-func SlurmQueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, error) {
+func QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, error) {
 	starttime := begin.Format(time.DateTime) // e.g. '2025-02-24 15:00'
 	endtime := end.Format(time.DateTime)     // e.g. '2025-02-24 15:00'
 	stdout, err := callProcess("sacct", "--cluster", clusterName, "--allusers", "--starttime", starttime, "--endtime", endtime, "--json")
@@ -425,7 +427,7 @@ func SlurmQueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJ
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	SlurmWarnVersion(result.Meta.Slurm.Version)
+	WarnVersion(result.Meta.Slurm.Version)
 
 	for _, job := range result.Jobs {
 		slurmSacctCacheAdd(&job)
@@ -434,7 +436,7 @@ func SlurmQueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJ
 	return result.Jobs, nil
 }
 
-func SlurmQueryJobsActive(clusterName string) ([]ScontrolJob, error) {
+func QueryJobsActive(clusterName string) ([]ScontrolJob, error) {
 	// Caution: it is important to use --noheader here.
 	// For multi cluster systems squeue will otherwise print non-JSON header lines.
 	stdout, err := callProcess("squeue", "--noheader", "--cluster", clusterName, "--all", "--json")
@@ -448,11 +450,11 @@ func SlurmQueryJobsActive(clusterName string) ([]ScontrolJob, error) {
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	SlurmWarnVersion(result.Meta.Slurm.Version)
+	WarnVersion(result.Meta.Slurm.Version)
 	return result.Jobs, nil
 }
 
-func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
+func GetScontrolJob(job SacctJob) (*ScontrolJob, error) {
 	// Performance info: This scontrol is usually fairly quickly, since this doesn't query the slurmdbd.
 	// In my tests it was around 100 executions per second.
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId), "--json")
@@ -482,7 +484,7 @@ func SlurmGetScontrolJob(job SacctJob) (*ScontrolJob, error) {
 	return &scResult.Jobs[0], nil
 }
 
-func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, error) {
+func GetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, error) {
 	// This function fetches additional information about a Slurm job via scontrol.
 	// Unfortunately some of the information is not available via sacct, so we need
 	// scontrol to get this information. Because this information is not stored
@@ -497,7 +499,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		// If no jobs are returned, this is most likely because the job has already ended some time ago.
 		// There is nothing we can do about this, so try to obtain hostnames
 		// and continue without hwthread information.
-		nodes, err := SlurmGetNodes(saJob)
+		nodes, err := GetNodes(saJob)
 		if err != nil {
 			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", *saJob.JobId, err)
 		}
@@ -538,16 +540,16 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 		var accelerators []string
 		if *allocation.Index < len(scJob.GresDetail) {
 			trace.Debug("Detecting GPU via gres")
-			nodeGres, err := SlurmParseGRES(scJob.GresDetail[*allocation.Index])
+			nodeGres, err := ParseGRES(scJob.GresDetail[*allocation.Index])
 			if err == nil && nodeGres.Variant == "gpu" {
 				found := false
-				for hostRegex, pciAddrList := range Config.GpuPciAddrs {
+				for hostRegex, pciAddrList := range config.Config.GpuPciAddrs {
 					// We initially check the regex, so no need to check for errors again.
 					match, _ := regexp.MatchString(hostRegex, *allocation.Hostname)
 					if match {
 						for _, v := range nodeGres.DomainIndices {
 							if v >= len(pciAddrList) {
-								trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *saJob.JobId, v, len(Config.GpuPciAddrs))
+								trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *saJob.JobId, v, len(config.Config.GpuPciAddrs))
 								continue
 							}
 							trace.Debug("Found GPU %d for %s: %s", v, *allocation.Hostname, pciAddrList[v])
@@ -578,7 +580,7 @@ func SlurmGetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, 
 	return resources, nil
 }
 
-func SlurmGetNodes(job SacctJob) ([]string, error) {
+func GetNodes(job SacctJob) ([]string, error) {
 	if strings.ToLower(*job.Nodes) == "none assigned" {
 		// Jobs, which have been cancelled before being scheduled, won't have any
 		// hostnames listed. Return an empty list in this case.
@@ -592,7 +594,7 @@ func SlurmGetNodes(job SacctJob) ([]string, error) {
 	return strings.Split(stdout, "\n"), nil
 }
 
-func SlurmGetJobInfoText(job SacctJob) string {
+func GetJobInfoText(job SacctJob) string {
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId))
 	if err != nil {
 		// If query fails, this is most likely because the job has already ended some time ago.
@@ -608,7 +610,7 @@ func SlurmGetJobInfoText(job SacctJob) string {
 	return strings.TrimSpace(stdout)
 }
 
-func SlurmGetJobScript(job SacctJob) string {
+func GetJobScript(job SacctJob) string {
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "write", "batch_script", fmt.Sprintf("%d", *job.JobId), "-")
 	if err != nil {
 		// If the job has ended some time ago, this will fail.
@@ -618,7 +620,7 @@ func SlurmGetJobScript(job SacctJob) string {
 	return stdout
 }
 
-func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
+func WarnVersion(ver SlurmMetaSlurmVersion) {
 	major, _ := strconv.Atoi(string(ver.Major))
 	minor, _ := strconv.Atoi(string(ver.Minor))
 	if major < SLURM_MAX_VER_MAJ {
@@ -630,7 +632,7 @@ func SlurmWarnVersion(ver SlurmMetaSlurmVersion) {
 	trace.Warn("Detected Slurm version %s.%s.%s. Last supported version is %d.%d.X. Please check if cc-slurm-adapter is working correctly. If so, bump the version number in the source to suppress this warning.", ver.Major, ver.Minor, ver.Micro, major, minor)
 }
 
-func SlurmCheckPerms() {
+func CheckPerms() {
 	trace.Debug("SlurmCheckPerms()")
 
 	// This function checks, whether we are a Slurm operator. Issue a warning
@@ -656,7 +658,7 @@ func SlurmCheckPerms() {
 		return
 	}
 
-	SlurmWarnVersion(result.Meta.Slurm.Version)
+	WarnVersion(result.Meta.Slurm.Version)
 
 	trace.Debug("Checking permissions for user: %s", username)
 	trace.Debug("Users returned: %s", stdout)
@@ -674,7 +676,7 @@ func SlurmCheckPerms() {
 	trace.Warn("sacctmgr reported that our user '%s' is not a Slurm operator. If Slurm uses relaxed permissions, this is not a problem. However, if not, NO JOBS WILL BE REPORTED! Run 'sacctmgr add user %s Account=root AdminLevel=operator'", username, username)
 }
 
-func SlurmGetClusterStats(cluster string) ([]SinfoPartial, error) {
+func GetClusterStats(cluster string) ([]SinfoPartial, error) {
 	trace.Debug("SlurmGetClusterStats()")
 
 	stdout, err := callProcess("sinfo", "--cluster", cluster, "--noheader", "--json")
@@ -691,7 +693,7 @@ func SlurmGetClusterStats(cluster string) ([]SinfoPartial, error) {
 	return result.Sinfo, nil
 }
 
-func SlurmParseGRES(gres string) (*GRES, error) {
+func ParseGRES(gres string) (*GRES, error) {
 	// e.g. "gpu:h100:4(IDX:0-3)" --> "gpu" "h100" "4" "IDX" "0-3"
 	gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\((\\w+):([0-9,\\-]+)\\)$")
 	gresParsed := gresParseRegex.FindStringSubmatch(gres)

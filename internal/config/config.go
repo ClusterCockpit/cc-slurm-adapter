@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -53,7 +53,7 @@ type ProgramConfig struct {
 	NatsNKeySeedFile    string              `json:"natsNKeySeedFile"`
 }
 
-func LoadConfig(configPath string) {
+func Load(configPath string) {
 	orgConfigPath := configPath
 	if configPath == "" {
 		configPath = DEFAULT_CONFIG_PATH

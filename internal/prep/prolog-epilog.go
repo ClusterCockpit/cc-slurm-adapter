@@ -1,4 +1,4 @@
-package main
+package prep
 
 import (
 	"encoding/json"
@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
+
 	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
 
@@ -15,7 +17,7 @@ import (
 // Slurmctld Prologue/Epilogue. See here for the full list:
 // https://slurm.schedmd.com/prolog_epilog.html
 // This may change in Slurm version > 24.11
-type PrologEpilogSlurmctldEnv struct {
+type SlurmctldEnv struct {
 	CUDA_MPS_ACTIVE_THREAD_PERCENTAGE string `json:"CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"`
 	CUDA_VISIBLE_DEVICES              string `json:"CUDA_VISIBLE_DEVICES"`
 	GPU_DEVICE_ORDINAL                string `json:"GPU_DEVICE_ORDINAL"`
@@ -59,14 +61,14 @@ type PrologEpilogSlurmctldEnv struct {
 	SacctAttempts int `json:"-"`
 }
 
-func CollectEnvironmentValues() (PrologEpilogSlurmctldEnv, error) {
+func CollectEnvironmentValues() (SlurmctldEnv, error) {
 	// Collect all interesting envinroment variables from Slurm and pack them into a struct.
 	// If you need to change any of the enivonrment variables, simply add them to the struct above.
 	// The code below will automatically read the appropriate environment variables.
 	// While Prolog and Epilog use a slightly different set of environment variables, we can
 	// query all of them in both cases. If they are not set, they will simply stay blank, which is okay.
 
-	var retval PrologEpilogSlurmctldEnv
+	var retval SlurmctldEnv
 
 	// perhaps this reflection part can be done a bit more nicely
 	v := reflect.ValueOf(&retval)
@@ -91,7 +93,7 @@ func CollectEnvironmentValues() (PrologEpilogSlurmctldEnv, error) {
 	return retval, nil
 }
 
-func PrologEpilogMain() error {
+func Main() error {
 	trace.Info("Starting Prolog")
 
 	if _, exists := os.LookupEnv("SLURM_JOB_ID"); !exists {
@@ -100,7 +102,7 @@ func PrologEpilogMain() error {
 	}
 
 	trace.Debug("Connecting to PrEp Socket")
-	sockType, sockAddr := GetProtoAddr(Config.PrepSockConnectPath)
+	sockType, sockAddr := config.GetProtoAddr(config.Config.PrepSockConnectPath)
 	con, err := net.Dial(sockType, sockAddr)
 	if err != nil {
 		return fmt.Errorf("Unable to connect to the daemon's unix socket. Is the daemon running?: %w", err)
