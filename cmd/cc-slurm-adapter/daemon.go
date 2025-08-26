@@ -18,8 +18,7 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/prep"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
-
-	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 )
 
 var (

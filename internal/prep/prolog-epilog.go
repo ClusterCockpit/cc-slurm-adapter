@@ -9,8 +9,7 @@ import (
 	"slices"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
-
-	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 )
 
 // The following struct *should* contain all environment variables set in the

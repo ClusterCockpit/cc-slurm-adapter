@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
-	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 )
 
 var (

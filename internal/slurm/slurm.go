@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 
 	"github.com/ClusterCockpit/cc-lib/schema"
-	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
 )
 
 // SlurmInt supports these two JSON layouts:

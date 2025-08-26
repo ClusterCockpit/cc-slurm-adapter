@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ClusterCockpit/cc-slurm-adapter/trace"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 )
 
 const (
