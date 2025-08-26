@@ -22,8 +22,8 @@ import (
 )
 
 var (
-	jobEvents  []prep.SlurmctldEnv
-	slurmClusters   []string
+	jobEvents     []prep.SlurmctldEnv
+	slurmClusters []string
 )
 
 func DaemonMain() error {

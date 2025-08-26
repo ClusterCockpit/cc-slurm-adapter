@@ -1,4 +1,4 @@
-.PHONY: cc-slurm-adapter clean
+.PHONY: cc-slurm-adapter clean format
 
 cc-slurm-adapter:
 	go build ./cmd/cc-slurm-adapter
@@ -7,3 +7,6 @@ cc-slurm-adapter:
 clean:
 	go clean
 	rm -f cc-slurm-adapter
+
+format:
+	go fmt ./...

@@ -2,12 +2,12 @@ package cc
 
 import (
 	"bytes"
-	"io"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"regexp"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,10 +39,10 @@ type CacheJobState struct {
 const CACHE_EVICT_COUNT int = 5
 
 var (
-	hostname   string
-	natsConn   *nats.Conn
-	httpClient http.Client
-	clusterNames   []string
+	hostname     string
+	natsConn     *nats.Conn
+	httpClient   http.Client
+	clusterNames []string
 
 	// map['clusterName'] -> map[slurmId] -> CC Job State, which are currently running (or ran recently).
 	// When a jobs is started, they are inserted into the map. When they are stopped
