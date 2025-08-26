@@ -155,7 +155,7 @@ Config Key | Optional | Description
 ### How to compile
 
 ```
-$ go build
+$ make
 ```
 
 ### Daemon (required)
