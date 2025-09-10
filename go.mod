@@ -1,12 +1,12 @@
 module github.com/ClusterCockpit/cc-slurm-adapter
 
-go 1.23.5
+go 1.24.0
 
-toolchain go1.24.2
+toolchain go1.24.4
 
 require (
-	github.com/ClusterCockpit/cc-lib v0.5.0
-	github.com/nats-io/nats.go v1.43.0
+	github.com/ClusterCockpit/cc-lib v0.8.0
+	github.com/nats-io/nats.go v1.45.0
 )
 
 require (
@@ -19,11 +19,11 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/nats-io/nkeys v0.4.11 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
-	github.com/oapi-codegen/runtime v1.1.1 // indirect
+	github.com/oapi-codegen/runtime v1.1.2 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
-	golang.org/x/crypto v0.39.0 // indirect
-	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
-	golang.org/x/net v0.41.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/crypto v0.42.0 // indirect
+	golang.org/x/exp v0.0.0-20250819193227-8b4c13bb791b // indirect
+	golang.org/x/net v0.44.0 // indirect
+	golang.org/x/sys v0.36.0 // indirect
 )

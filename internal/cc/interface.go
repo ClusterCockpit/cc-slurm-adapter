@@ -655,17 +655,17 @@ func slurmJobToCcStartJob(job slurm.SacctJob) (*StartJobRequest, error) {
 	metaData["slurmInfo"] = slurm.GetJobInfoText(job)
 	metaData["submitTime"] = fmt.Sprintf("%v", job.Time.Submission.Number)
 
-	var exclusive int32
+	shared := "multi_user"
 	if scJob != nil {
 		if scJob.Exclusive != nil && string(*scJob.Exclusive) == "true" {
-			exclusive = 1
+			shared = "none"
 		} else if scJob.Shared != nil {
 			if string(*scJob.Shared) == "user" {
-				exclusive = 0
+				shared = "single_user"
 			} else if string(*scJob.Shared) == "none" {
-				exclusive = 1
+				shared = "none"
 			} else if string(*scJob.Shared) == "" {
-				exclusive = 0
+				shared = "multi_user"
 			}
 		} else {
 			trace.Debug("No information available about exclusive/shared for job %d.", *job.JobId)
@@ -679,7 +679,7 @@ func slurmJobToCcStartJob(job slurm.SacctJob) (*StartJobRequest, error) {
 		ArrayJobId:   int64(*job.Array.JobId),
 		NumNodes:     int32(job.AllocationNodes.Number),
 		NumHWThreads: int32(job.Required.CPUs.Number),
-		Exclusive:    exclusive,
+		Shared:       shared,
 		Walltime:     job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
 		Resources:    resources,
 		MetaData:     metaData,
