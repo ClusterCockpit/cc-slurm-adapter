@@ -483,7 +483,7 @@ func SyncStats() error {
 
 		nodeStates := struct {
 			Cluster string `json:"cluster"`
-			Nodes   []Node `json:"node"`
+			Nodes   []Node `json:"nodes"`
 		}{}
 
 		nodeStates.Cluster = cluster
