@@ -478,7 +478,6 @@ func SyncStats() error {
 			MemoryTotal     int      `json:"memoryTotal"`
 			GpusAllocated   int      `json:"gpusAllocated"`
 			GpusTotal       int      `json:"gpusTotal"`
-			JobsRunning     int      `json:"jobsRunning"`
 		}
 
 		nodeStates := struct {
@@ -523,8 +522,6 @@ func SyncStats() error {
 						node.States = append(node.States, state)
 					}
 				}
-
-				node.JobsRunning = len(hostToJobs[hostname])
 
 				nodesMap[hostname] = node
 			}
