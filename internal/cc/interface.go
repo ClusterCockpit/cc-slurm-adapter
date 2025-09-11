@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -469,15 +470,15 @@ func SyncStats() error {
 
 		type Node struct {
 			// map[state]true
-			Hostname        string          `json:"hostname"`
-			States          map[string]bool `json:"states"`
-			CpusAllocated   int             `json:"cpusAllocated"`
-			CpusTotal       int             `json:"cpusTotal"`
-			MemoryAllocated int             `json:"memoryAllocated"`
-			MemoryTotal     int             `json:"memoryTotal"`
-			GpusAllocated   int             `json:"gpusAllocated"`
-			GpusTotal       int             `json:"gpusTotal"`
-			JobsRunning     int             `json:"jobsRunning"`
+			Hostname        string   `json:"hostname"`
+			States          []string `json:"states"`
+			CpusAllocated   int      `json:"cpusAllocated"`
+			CpusTotal       int      `json:"cpusTotal"`
+			MemoryAllocated int      `json:"memoryAllocated"`
+			MemoryTotal     int      `json:"memoryTotal"`
+			GpusAllocated   int      `json:"gpusAllocated"`
+			GpusTotal       int      `json:"gpusTotal"`
+			JobsRunning     int      `json:"jobsRunning"`
 		}
 
 		nodeStates := struct {
@@ -495,7 +496,7 @@ func SyncStats() error {
 				node, ok := nodesMap[hostname]
 				if !ok {
 					node = Node{
-						States: make(map[string]bool),
+						States: make([]string, 0),
 					}
 				}
 
@@ -518,7 +519,9 @@ func SyncStats() error {
 				}
 
 				for _, state := range stat.Node.State {
-					node.States[state] = true
+					if !slices.Contains(node.States, state) {
+						node.States = append(node.States, state)
+					}
 				}
 
 				node.JobsRunning = len(hostToJobs[hostname])
@@ -531,29 +534,25 @@ func SyncStats() error {
 			nodeStates.Nodes = append(nodeStates.Nodes, node)
 		}
 
-		_, err = json.Marshal(nodeStates)
+		nodeStateDataJSON, err := json.Marshal(nodeStates)
 		if err != nil {
 			return fmt.Errorf("Unable to convert NodeState to JSON: %w", err)
 		}
 
-		// TODO remove this continue statement, once we actually want to submit things to CC
-		//trace.Debug("CC STATE SYNC: %v\n", string(nodeStateDataJSON))
-		continue
+		respNodeState, err := ccPost("/nodestats/", nodeStateDataJSON)
+		if err != nil {
+			return err
+		}
 
-		//respNodeState, err := ccPost("/nodestate/", nodeStateDataJSON)
-		//if err != nil {
-		//	return err
-		//}
+		defer respNodeState.Body.Close()
+		body, err := io.ReadAll(respNodeState.Body)
+		if err != nil {
+			return err
+		}
 
-		//defer respNodeState.Body.Close()
-		//body, err := io.ReadAll(respNodeState.Body)
-		//if err != nil {
-		//	return err
-		//}
-
-		//if respNodeState.StatusCode != 201 {
-		//	return fmt.Errorf("Calling /nodes/update/ (%s) failed with HTTP: %d: Body: %s", cluster, respNodeState.StatusCode, string(body))
-		//}
+		if respNodeState.StatusCode != 201 {
+			return fmt.Errorf("Calling /nodes/update/ (%s) failed with HTTP: %d: Body: %s", cluster, respNodeState.StatusCode, string(body))
+		}
 	}
 
 	trace.Info("Updated CC node state on clusters %v", clusterNames)

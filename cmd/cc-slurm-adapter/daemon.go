@@ -118,8 +118,8 @@ func DaemonMain() error {
 			}
 			err = cc.SyncStats()
 			if err != nil {
-				trace.Error("Unable to sync stats to cc-backend. Trying later...")
-				break
+				// cc-backend requires at least a version somewhere around 2025-09-10 to support stat syncing
+				trace.Error("Unable to sync stats to cc-backend. Is your cc-backend version recent enough?")
 			}
 			processSlurmSacctPoll()
 			processSlurmSqueuePoll()
