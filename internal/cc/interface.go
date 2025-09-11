@@ -547,7 +547,7 @@ func SyncStats() error {
 			return err
 		}
 
-		if respNodeState.StatusCode != 201 {
+		if respNodeState.StatusCode != 200 {
 			return fmt.Errorf("Calling /nodes/update/ (%s) failed with HTTP: %d: Body: %s", cluster, respNodeState.StatusCode, string(body))
 		}
 	}
