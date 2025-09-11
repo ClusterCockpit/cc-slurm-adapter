@@ -539,7 +539,7 @@ func SyncStats() error {
 			return fmt.Errorf("Unable to convert NodeState to JSON: %w", err)
 		}
 
-		respNodeState, err := ccPost("/nodestats/", nodeStateDataJSON)
+		respNodeState, err := ccPost("/nodestate/", nodeStateDataJSON)
 		if err != nil {
 			return err
 		}
