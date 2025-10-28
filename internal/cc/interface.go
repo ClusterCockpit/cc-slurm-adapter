@@ -468,52 +468,38 @@ func SyncStats() error {
 			continue
 		}
 
-		type Node struct {
-			// map[state]true
-			Hostname        string   `json:"hostname"`
-			States          []string `json:"states"`
-			CpusAllocated   int      `json:"cpusAllocated"`
-			CpusTotal       int      `json:"cpusTotal"`
-			MemoryAllocated int      `json:"memoryAllocated"`
-			MemoryTotal     int      `json:"memoryTotal"`
-			GpusAllocated   int      `json:"gpusAllocated"`
-			GpusTotal       int      `json:"gpusTotal"`
-		}
-
 		nodeStates := struct {
 			Cluster string `json:"cluster"`
-			Nodes   []Node `json:"nodes"`
+			Nodes   []schema.NodePayload `json:"nodes"`
 		}{}
 
 		nodeStates.Cluster = cluster
-		nodeStates.Nodes = make([]Node, 0)
+		nodeStates.Nodes = make([]schema.NodePayload, 0)
 
-		nodesMap := make(map[string]Node)
+		nodesMap := make(map[string]schema.NodePayload)
 
 		for _, stat := range stats {
 			for _, hostname := range stat.Nodes.Nodes {
 				node, ok := nodesMap[hostname]
 				if !ok {
-					node = Node{
-						States: make([]string, 0),
-					}
+					node = schema.NodePayload{}
 				}
 
 				node.Hostname = hostname
 				// For some reason the CPU core counts are aggregated over the number of nodes
 				node.CpusAllocated = *stat.Cpus.Allocated / len(stat.Nodes.Nodes)
-				node.CpusTotal = *stat.Cpus.Total / len(stat.Nodes.Nodes)
+				//node.CpusTotal = *stat.Cpus.Total / len(stat.Nodes.Nodes)
 				// Memory is not aggragated
 				node.MemoryAllocated = *stat.Memory.Allocated
-				node.MemoryTotal = *stat.Memory.Maximum
+				//node.MemoryTotal = *stat.Memory.Maximum
 				// Neither is GRES
-				gresTotal, errTotal := slurm.ParseGRES(*stat.Gres.Total)
 				gresAlloc, errAlloc := slurm.ParseGRES(*stat.Gres.Used)
+				_, errTotal := slurm.ParseGRES(*stat.Gres.Total)
 				if errTotal == nil && errAlloc == nil {
-					node.GpusTotal = int(gresTotal.Count)
+					//node.GpusTotal = int(gresTotal.Count)
 					node.GpusAllocated = int(gresAlloc.Count)
 				} else {
-					node.GpusTotal = 0
+					//node.GpusTotal = 0
 					node.GpusAllocated = 0
 				}
 
@@ -672,7 +658,7 @@ func slurmJobToCcStartJob(job slurm.SacctJob) (*StartJobRequest, error) {
 		Cluster:      *job.Cluster,
 		Partition:    *job.Partition,
 		Project:      *job.Account,
-		ArrayJobId:   int64(*job.Array.JobId),
+		ArrayJobID:   int64(*job.Array.JobId),
 		NumNodes:     int32(job.AllocationNodes.Number),
 		NumHWThreads: int32(job.Required.CPUs.Number),
 		Shared:       shared,
