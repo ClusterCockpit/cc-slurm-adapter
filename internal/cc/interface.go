@@ -460,7 +460,7 @@ func SyncStats() error {
 		}
 
 		nodeStates := struct {
-			Cluster string `json:"cluster"`
+			Cluster string               `json:"cluster"`
 			Nodes   []schema.NodePayload `json:"nodes"`
 		}{}
 
