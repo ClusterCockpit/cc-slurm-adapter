@@ -9,27 +9,18 @@ import (
 	"os"
 	"regexp"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
 
 	"github.com/nats-io/nats.go"
 
 	"github.com/ClusterCockpit/cc-lib/ccMessage"
 	"github.com/ClusterCockpit/cc-lib/schema"
 )
-
-type StartJobRequest schema.Job
-
-type StopJobRequest struct {
-	JobId    uint32          `json:"jobId"     db:"job_id"`
-	Cluster  string          `json:"cluster"   db:"cluster"`
-	State    schema.JobState `json:"jobState"  db:"state"`
-	StopTime int64           `json:"stopTime"  db:"stop_time"`
-}
 
 type CacheJobState struct {
 	CacheEvictAge int
@@ -273,7 +264,7 @@ func SyncJob(job slurm.SacctJob, force bool) error {
 		return nil
 	}
 
-	startJobData, err := slurmJobToCcStartJob(job)
+	startJobData, err := slurm.JobToCcStartJob(job)
 	if err != nil {
 		return err
 	}
@@ -307,7 +298,7 @@ func SyncJob(job slurm.SacctJob, force bool) error {
 	return nil
 }
 
-func StartJob(job slurm.SacctJob, startJobData *StartJobRequest) error {
+func StartJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) error {
 	cluster := *job.Cluster
 	jobId := int64(*job.JobId)
 
@@ -378,7 +369,7 @@ func StopJob(job slurm.SacctJob) error {
 		return nil
 	}
 
-	stopJobData := slurmJobToCcStopJob(job)
+	stopJobData := slurm.JobToCcStopJob(job)
 	stopJobDataJSON, err := json.Marshal(stopJobData)
 	if err != nil {
 		return fmt.Errorf("Unable to convert StopJobRequest to JSON: %w", err)
@@ -573,7 +564,7 @@ func ccGet(relApiUrl string) (*http.Response, error) {
 	return httpClient.Do(req)
 }
 
-func checkIgnoreJob(job slurm.SacctJob, startJobData *StartJobRequest) bool {
+func checkIgnoreJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) bool {
 	// We may want to filter out certain jobs, that shall not be submitted to cc-backend.
 	// Put more rules here if necessary.
 	trace.Debug("Checking whether job %d should be ignored", *job.JobId)
@@ -611,105 +602,6 @@ func checkIgnoreJob(job slurm.SacctJob, startJobData *StartJobRequest) bool {
 	}
 
 	return false
-}
-
-func slurmJobToCcStartJob(job slurm.SacctJob) (*StartJobRequest, error) {
-	// TODO Maybe we should move this into slurm.go. We shouldn't really use slurm
-	// datastructures outside of slurm.go.
-	scJob, err := slurm.GetScontrolJob(job)
-	if err != nil {
-		return nil, err
-	}
-
-	resources, err := slurm.GetResources(job, scJob)
-	if err != nil {
-		// This error should only occur for criticial errors.
-		// Non critical errors won't enter this case.
-		return nil, err
-	}
-
-	metaData := make(map[string]string)
-	jobScript := slurm.GetJobScript(job)
-	if jobScript != "" {
-		metaData["jobScript"] = jobScript
-	}
-	metaData["jobName"] = *job.Name
-	metaData["slurmInfo"] = slurm.GetJobInfoText(job)
-	metaData["submitTime"] = fmt.Sprintf("%v", job.Time.Submission.Number)
-
-	shared := "multi_user"
-	if scJob != nil {
-		if scJob.Exclusive != nil && string(*scJob.Exclusive) == "true" {
-			shared = "none"
-		} else if scJob.Shared != nil {
-			if string(*scJob.Shared) == "user" {
-				shared = "single_user"
-			} else if string(*scJob.Shared) == "none" {
-				shared = "none"
-			} else if string(*scJob.Shared) == "" {
-				shared = "multi_user"
-			}
-		} else {
-			trace.Debug("No information available about exclusive/shared for job %d.", *job.JobId)
-		}
-	}
-
-	ccStartJob := StartJobRequest{
-		Cluster:      *job.Cluster,
-		Partition:    *job.Partition,
-		Project:      *job.Account,
-		ArrayJobID:   int64(*job.Array.JobId),
-		NumNodes:     int32(job.AllocationNodes.Number),
-		NumHWThreads: int32(job.Required.CPUs.Number),
-		Shared:       shared,
-		Walltime:     job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
-		Resources:    resources,
-		MetaData:     metaData,
-		JobID:        int64(*job.JobId),
-		User:         *job.User,
-		StartTime:    job.Time.Start.Number,
-	}
-
-	// Determine number of CPUs and accelerators. Use requested values
-	// as base, and use allocated values, if available.
-	setResources := func(tresList []slurm.SacctJobTres, ccStartJob *StartJobRequest) {
-		for _, tres := range tresList {
-			if *tres.Type == "cpu" {
-				ccStartJob.NumHWThreads = int32(*tres.Count)
-			}
-
-			if *tres.Type == "gres" && *tres.Name == "gpu" {
-				ccStartJob.NumAcc = int32(*tres.Count)
-			}
-		}
-	}
-
-	setResources(job.Tres.Requested, &ccStartJob)
-	setResources(job.Tres.Allocated, &ccStartJob)
-
-	return &ccStartJob, nil
-}
-
-func slurmJobToCcStopJob(job slurm.SacctJob) StopJobRequest {
-	StopJob := StopJobRequest{
-		JobId:    *job.JobId,
-		Cluster:  *job.Cluster,
-		State:    schema.JobState(strings.ToLower(string(*job.State.Current))),
-		StopTime: job.Time.End.Number,
-	}
-
-	// WORKAROUNDS due to cc-backend's lack of support for them.
-	// Ideally this should be removed in the future.
-	if StopJob.State == "node_fail" {
-		trace.Warn("Altering status 'node_fail' to 'failure' for job %d. If this is finally supported in cc-backend, the code generating this message can be removed", *job.JobId)
-		StopJob.State = "failure"
-	}
-
-	if StopJob.State == "failure" {
-		trace.Debug("Altering status 'failure' to 'failed' for job %d", *job.JobId)
-		StopJob.State = "failed"
-	}
-	return StopJob
 }
 
 func jobHasResources(job schema.Job) bool {

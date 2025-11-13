@@ -14,6 +14,7 @@ import (
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
 
 	"github.com/ClusterCockpit/cc-lib/schema"
 )
@@ -337,6 +338,105 @@ func (v *SlurmIntString) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	return err
+}
+
+func JobToCcStartJob(job SacctJob) (*types.CCStartJobRequest, error) {
+	// TODO Maybe we should move this into slurm.go. We shouldn't really use slurm
+	// datastructures outside of slurm.go.
+	scJob, err := GetScontrolJob(job)
+	if err != nil {
+		return nil, err
+	}
+
+	resources, err := GetResources(job, scJob)
+	if err != nil {
+		// This error should only occur for criticial errors.
+		// Non critical errors won't enter this case.
+		return nil, err
+	}
+
+	metaData := make(map[string]string)
+	jobScript := GetJobScript(job)
+	if jobScript != "" {
+		metaData["jobScript"] = jobScript
+	}
+	metaData["jobName"] = *job.Name
+	metaData["slurmInfo"] = GetJobInfoText(job)
+	metaData["submitTime"] = fmt.Sprintf("%v", job.Time.Submission.Number)
+
+	shared := "multi_user"
+	if scJob != nil {
+		if scJob.Exclusive != nil && string(*scJob.Exclusive) == "true" {
+			shared = "none"
+		} else if scJob.Shared != nil {
+			if string(*scJob.Shared) == "user" {
+				shared = "single_user"
+			} else if string(*scJob.Shared) == "none" {
+				shared = "none"
+			} else if string(*scJob.Shared) == "" {
+				shared = "multi_user"
+			}
+		} else {
+			trace.Debug("No information available about exclusive/shared for job %d.", *job.JobId)
+		}
+	}
+
+	ccStartJob := types.CCStartJobRequest{
+		Cluster:      *job.Cluster,
+		Partition:    *job.Partition,
+		Project:      *job.Account,
+		ArrayJobID:   int64(*job.Array.JobId),
+		NumNodes:     int32(job.AllocationNodes.Number),
+		NumHWThreads: int32(job.Required.CPUs.Number),
+		Shared:       shared,
+		Walltime:     job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
+		Resources:    resources,
+		MetaData:     metaData,
+		JobID:        int64(*job.JobId),
+		User:         *job.User,
+		StartTime:    job.Time.Start.Number,
+	}
+
+	// Determine number of CPUs and accelerators. Use requested values
+	// as base, and use allocated values, if available.
+	setResources := func(tresList []SacctJobTres, ccStartJob *types.CCStartJobRequest) {
+		for _, tres := range tresList {
+			if *tres.Type == "cpu" {
+				ccStartJob.NumHWThreads = int32(*tres.Count)
+			}
+
+			if *tres.Type == "gres" && *tres.Name == "gpu" {
+				ccStartJob.NumAcc = int32(*tres.Count)
+			}
+		}
+	}
+
+	setResources(job.Tres.Requested, &ccStartJob)
+	setResources(job.Tres.Allocated, &ccStartJob)
+
+	return &ccStartJob, nil
+}
+
+func JobToCcStopJob(job SacctJob) types.CCStopJobRequest {
+	stopJob := types.CCStopJobRequest{
+		JobId:    *job.JobId,
+		Cluster:  *job.Cluster,
+		State:    schema.JobState(strings.ToLower(string(*job.State.Current))),
+		StopTime: job.Time.End.Number,
+	}
+
+	// WORKAROUNDS due to cc-backend's lack of support for them.
+	// Ideally this should be removed in the future.
+	if stopJob.State == "node_fail" {
+		trace.Warn("Altering status 'node_fail' to 'failure' for job %d. If this is finally supported in cc-backend, the code generating this message can be removed", *job.JobId)
+		stopJob.State = "failure"
+	}
+
+	if stopJob.State == "failure" {
+		trace.Debug("Altering status 'failure' to 'failed' for job %d", *job.JobId)
+		stopJob.State = "failed"
+	}
+	return stopJob
 }
 
 func GetClusterNames() ([]string, error) {
