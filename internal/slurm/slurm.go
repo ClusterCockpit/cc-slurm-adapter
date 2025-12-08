@@ -414,8 +414,8 @@ func QueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 }
 
 func QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, error) {
-	starttime := begin.Format(time.DateTime) // e.g. '2025-02-24 15:00'
-	endtime := end.Format(time.DateTime)     // e.g. '2025-02-24 15:00'
+	starttime := begin.Format("2006-01-02T15:04:05") // e.g. '2025-02-24T15:00:00'
+	endtime := end.Format("2006-01-02T15:04:05")     // e.g. '2025-02-24T15:00:00'
 	stdout, err := callProcess("sacct", "--cluster", clusterName, "--allusers", "--starttime", starttime, "--endtime", endtime, "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacct /w starttime/endtime: %w. (%s)", err, stdout)
