@@ -8,13 +8,12 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"slices"
 	"time"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
-	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 
 	"github.com/nats-io/nats.go"
 
@@ -30,7 +29,7 @@ type CacheJobState struct {
 
 const CACHE_EVICT_COUNT int = 5
 
-var (
+type CCApi struct {
 	hostname     string
 	natsConn     *nats.Conn
 	httpClient   http.Client
@@ -45,22 +44,26 @@ var (
 	JobCache      map[string]map[int64]*CacheJobState
 	JobCacheValid bool
 	JobCacheDate  time.Time
-)
 
-func Init(clusterNamesInit []string) error {
-	clusterNames = clusterNamesInit
+	slurmApi slurm_common.SlurmApi
+}
+
+func NewCCApi(clusterNamesInit []string, slurmApi slurm_common.SlurmApi) (*CCApi, error) {
+	ccApi := &CCApi{}
+
+	ccApi.clusterNames = clusterNamesInit
 
 	// Init HTTP client
 	tr := &http.Transport{
 		MaxIdleConns:    10,
 		IdleConnTimeout: 2 * time.Duration(config.Config.SlurmPollInterval) * time.Second,
 	}
-	httpClient = http.Client{Transport: tr}
+	ccApi.httpClient = http.Client{Transport: tr}
 
 	var err error
-	hostname, err = os.Hostname()
+	ccApi.hostname, err = os.Hostname()
 	if err != nil {
-		return fmt.Errorf("Unable to obtain hostname: %w", err)
+		return nil, fmt.Errorf("Unable to obtain hostname: %w", err)
 	}
 
 	// Init NATS client
@@ -74,40 +77,40 @@ func Init(clusterNamesInit []string) error {
 	if len(config.Config.NatsNKeySeedFile) > 0 {
 		r, err := nats.NkeyOptionFromSeed(config.Config.NatsNKeySeedFile)
 		if err != nil {
-			return fmt.Errorf("Unable to open NKeySeedFile: %w", err)
+			return nil, fmt.Errorf("Unable to open NKeySeedFile: %w", err)
 		}
 		options = append(options, r)
 	}
 	if len(config.Config.NatsServer) > 0 {
 		natsAddr := fmt.Sprintf("nats://%s:%d", config.Config.NatsServer, config.Config.NatsPort)
 		trace.Info("Connecting to NATS: %s", natsAddr)
-		natsConn, err = nats.Connect(natsAddr, options...)
+		ccApi.natsConn, err = nats.Connect(natsAddr, options...)
 		if err != nil {
-			return fmt.Errorf("Unable to connect to NATS (server: %s): %w", natsAddr, err)
+			return nil, fmt.Errorf("Unable to connect to NATS (server: %s): %w", natsAddr, err)
 		}
 	}
 
-	return nil
+	return ccApi, nil
 }
 
-func Quit() {
+func (api *CCApi) Close() {
 	trace.Debug("Closing HTTP connections")
-	httpClient.CloseIdleConnections()
+	api.httpClient.CloseIdleConnections()
 	trace.Debug("Closing NATS")
-	natsConn.Close()
-	natsConn = nil
+	api.natsConn.Close()
+	api.natsConn = nil
 }
 
-func CacheUpdate() error {
+func (api *CCApi) CacheUpdate() error {
 	// We maintain a local cache of which jobs are marked as running in cc-backend.
 	// Only refresh it if the cache was invalidated or if it wasn't refreshed for some time.
-	if JobCacheValid && JobCacheDate.Add(time.Duration(config.Config.CcPollInterval)*time.Second).After(time.Now()) {
+	if api.JobCacheValid && api.JobCacheDate.Add(time.Duration(config.Config.CcPollInterval)*time.Second).After(time.Now()) {
 		return nil
 	}
 
-	respJobs, err := ccGet("/jobs/?state=running&items-per-page=9999999&page=1&with-metadata=false")
+	respJobs, err := api.ccGet("/jobs/?state=running&items-per-page=9999999&page=1&with-metadata=false")
 	if err != nil {
-		JobCacheValid = false
+		api.JobCacheValid = false
 		return fmt.Errorf("Unable to GET running jobs from cc-backend: %w", err)
 	}
 
@@ -134,10 +137,10 @@ func CacheUpdate() error {
 
 	// init cache if not done so yet
 	initial := false
-	if JobCache == nil {
-		JobCache = make(map[string]map[int64]*CacheJobState)
-		for _, cluster := range clusterNames {
-			JobCache[cluster] = make(map[int64]*CacheJobState)
+	if api.JobCache == nil {
+		api.JobCache = make(map[string]map[int64]*CacheJobState)
+		for _, cluster := range api.clusterNames {
+			api.JobCache[cluster] = make(map[int64]*CacheJobState)
 		}
 		initial = true
 		trace.Info("Running initial cc-backend <---> cc-slurm-adapter synchronization. This may take a while.")
@@ -162,7 +165,7 @@ func CacheUpdate() error {
 				continue
 			}
 
-			if JobCache[ccJob.Cluster] == nil {
+			if api.JobCache[ccJob.Cluster] == nil {
 				// Skip jobs from cc-backend, which do not belong to the clusters that we manage.
 				// It may be nicer to not request them in the first place, but it's easier for now...
 				continue
@@ -170,7 +173,7 @@ func CacheUpdate() error {
 
 			ccJobCount += 1
 
-			cacheJob, ok := JobCache[ccJob.Cluster][ccJob.JobID]
+			cacheJob, ok := api.JobCache[ccJob.Cluster][ccJob.JobID]
 			if ok && !cacheJob.Running {
 				// All jobs fetched are assumed to be running, so do not allow that cache state.
 				ok = false
@@ -184,17 +187,17 @@ func CacheUpdate() error {
 				trace.Warn("Cache desync detected! Fetching running job (%s, %d) from cc-backend to cache.", ccJob.Cluster, ccJob.JobID)
 			}
 
-			slurmJob, err := slurm.QueryJob(ccJob.Cluster, uint32(ccJob.JobID))
+			slurmJob, err := api.slurmApi.QueryJob(ccJob.Cluster, uint32(ccJob.JobID))
 			if err != nil {
 				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", ccJob.Cluster, ccJob.JobID, err)
 				continue
 			}
 
-			JobCache[ccJob.Cluster][ccJob.JobID] = &CacheJobState{
+			api.JobCache[ccJob.Cluster][ccJob.JobID] = &CacheJobState{
 				Running: true,
 			}
 
-			err = SyncJob(*slurmJob, true)
+			err = api.SyncJob(slurmJob, true)
 			if err != nil {
 				trace.Error("Unable to correct desync (state may be inconsistent now!). Sync to cc-backend failed: %v", err)
 			}
@@ -202,7 +205,7 @@ func CacheUpdate() error {
 	}
 
 	// ... and now new cc-backend state <-- out old cc-backend state
-	for cluster, ccJobClusterCache := range JobCache {
+	for cluster, ccJobClusterCache := range api.JobCache {
 		for jobId, cacheJob := range ccJobClusterCache {
 			_, ok := ccJobState[cluster][jobId]
 			if !ok && !cacheJob.Running {
@@ -218,7 +221,7 @@ func CacheUpdate() error {
 				trace.Warn("Cache desync detected! Resetting missing/stopped job (%s, %d) from cc-backend in cache.", cluster, jobId)
 			}
 
-			slurmJob, err := slurm.QueryJob(cluster, uint32(jobId))
+			slurmJob, err := api.slurmApi.QueryJob(cluster, uint32(jobId))
 			if err != nil {
 				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", cluster, jobId, err)
 				continue
@@ -227,22 +230,22 @@ func CacheUpdate() error {
 			cacheJob.CacheEvictAge = 0
 			cacheJob.Running = false
 
-			err = SyncJob(*slurmJob, true)
+			err = api.SyncJob(slurmJob, true)
 			if err != nil {
 				trace.Error("Unable to correct desync (state may be inconsistent now!). Sync to cc-backend failed: %v", err)
 			}
 		}
 	}
 
-	JobCacheDate = time.Now()
-	JobCacheValid = true
+	api.JobCacheDate = time.Now()
+	api.JobCacheValid = true
 
 	trace.Info("CC Job Cache updated. Number of running jobs: %d", ccJobCount)
 	return nil
 }
 
-func CacheGC() {
-	for _, cachedJobStates := range JobCache {
+func (api *CCApi) CacheGC() {
+	for _, cachedJobStates := range api.JobCache {
 		for jobId, cachedJobState := range cachedJobStates {
 			if cachedJobState.Running {
 				cachedJobState.CacheEvictAge = 0
@@ -257,14 +260,14 @@ func CacheGC() {
 	}
 }
 
-func SyncJob(job slurm.SacctJob, force bool) error {
+func (api *CCApi) SyncJob(job slurm_common.SacctJob, force bool) error {
 	// Assert the job exists in cc-backend. Ignore if the job already exists.
 	if config.Config.CcRestUrl == "" {
 		trace.Info("Skipping submission to ClusterCockpit REST. Missing URL. This feature is optional, so we will continue running")
 		return nil
 	}
 
-	startJobData, err := slurm.JobToCcStartJob(job)
+	startJobData, err := api.slurmApi.JobToCCStartJob(job)
 	if err != nil {
 		return err
 	}
@@ -273,7 +276,7 @@ func SyncJob(job slurm.SacctJob, force bool) error {
 		return nil
 	}
 
-	err = StartJob(job, startJobData)
+	err = api.StartJob(job, startJobData)
 	if err != nil {
 		return err
 	}
@@ -283,26 +286,26 @@ func SyncJob(job slurm.SacctJob, force bool) error {
 	// At the moment, we can't do this yet, because cc-backend doesn't have an API endpoint to alter an existing job.
 
 	// Only submit stop job, if it has actually finished
-	if job.Time.End.Number <= 0 {
+	if !job.IsFinished() {
 		// A job which hasn't finished, has no end time set. This is easier than
 		// comparing against all possible job states.
 		return nil
 	}
 
-	err = StopJob(job)
+	err = api.StopJob(job)
 	if err != nil {
 		return err
 	}
 
-	JobCache[*job.Cluster][int64(*job.JobId)].Stale = false
+	api.JobCache[job.GetCluster()][job.GetJobId()].Stale = false
 	return nil
 }
 
-func StartJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) error {
-	cluster := *job.Cluster
-	jobId := int64(*job.JobId)
+func (api *CCApi) StartJob(job slurm_common.SacctJob, startJobData *types.CCStartJobRequest) error {
+	cluster := job.GetCluster()
+	jobId := job.GetJobId()
 
-	_, jobKnown := JobCache[cluster][jobId]
+	_, jobKnown := api.JobCache[cluster][jobId]
 	if jobKnown {
 		return nil
 	}
@@ -312,7 +315,7 @@ func StartJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) error {
 		return fmt.Errorf("Unable to convert StartJobRequest to JSON: %w", err)
 	}
 
-	respStart, err := ccPost("/jobs/start_job/", startJobDataJSON)
+	respStart, err := api.ccPost("/jobs/start_job/", startJobDataJSON)
 	if err != nil {
 		return err
 	}
@@ -333,7 +336,7 @@ func StartJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) error {
 	if respStart.StatusCode == 201 {
 		trace.Info("Sent start_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
-			"hostname": hostname,
+			"hostname": api.hostname,
 			"type":     "node",
 			"type-id":  "0",
 			"function": "start_job",
@@ -342,7 +345,7 @@ func StartJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) error {
 		if err != nil {
 			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
-			err = natsConn.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			err = api.natsConn.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
 			if err != nil {
 				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}
@@ -350,32 +353,36 @@ func StartJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) error {
 
 		if !jobHasResources(schema.Job(*startJobData)) {
 			// This should only happen if we resynchronize a job, after is has already stopped for some time.
-			trace.Warn("Unable to obtain Job (%s, %d) with hwthread/accelerator information. Some metrics may be missing in ClusterCockpit.", *job.Cluster, *job.JobId)
+			trace.Warn("Unable to obtain Job (%s, %d) with hwthread/accelerator information. Some metrics may be missing in ClusterCockpit.", job.GetCluster(), job.GetJobId())
 		}
 	}
 
-	JobCache[*job.Cluster][int64(*job.JobId)] = &CacheJobState{
+	api.JobCache[job.GetCluster()][job.GetJobId()] = &CacheJobState{
 		Running: true,
 	}
 	return nil
 }
 
-func StopJob(job slurm.SacctJob) error {
-	cluster := *job.Cluster
-	jobId := int64(*job.JobId)
+func (api *CCApi) StopJob(job slurm_common.SacctJob) error {
+	cluster := job.GetCluster()
+	jobId := job.GetJobId()
 
-	cachedJobState, jobKnown := JobCache[cluster][jobId]
+	cachedJobState, jobKnown := api.JobCache[cluster][jobId]
 	if jobKnown && !cachedJobState.Running {
 		return nil
 	}
 
-	stopJobData := slurm.JobToCcStopJob(job)
+	stopJobData, err := api.slurmApi.JobToCCStopJob(job)
+	if err != nil {
+		return err
+	}
+
 	stopJobDataJSON, err := json.Marshal(stopJobData)
 	if err != nil {
 		return fmt.Errorf("Unable to convert StopJobRequest to JSON: %w", err)
 	}
 
-	respStop, err := ccPost("/jobs/stop_job/", stopJobDataJSON)
+	respStop, err := api.ccPost("/jobs/stop_job/", stopJobDataJSON)
 	if err != nil {
 		return err
 	}
@@ -399,7 +406,7 @@ func StopJob(job slurm.SacctJob) error {
 	if respStop.StatusCode == 200 {
 		trace.Info("Sent stop_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
-			"hostname": hostname,
+			"hostname": api.hostname,
 			"type":     "node",
 			"type-id":  "0",
 			"function": "stop_job",
@@ -408,7 +415,7 @@ func StopJob(job slurm.SacctJob) error {
 		if err != nil {
 			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
-			err = natsConn.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			err = api.natsConn.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
 			if err != nil {
 				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}
@@ -420,100 +427,38 @@ func StopJob(job slurm.SacctJob) error {
 	} else {
 		// I can't imagine that this case occurs in practice, but who knows...
 		trace.Warn("Stopping a job (%s, %d), which is known by cc-backend but not in our cache. Did we miss a job start event?", cluster, jobId)
-		JobCache[cluster][jobId] = &CacheJobState{
+		api.JobCache[cluster][jobId] = &CacheJobState{
 			Running: false,
 		}
 	}
 	return nil
 }
 
-func SyncStats() error {
+func (api *CCApi) SyncStats() error {
 	//slurmStateToCCSate := make(map[string]string)
 
-	for _, cluster := range clusterNames {
-		// Create a list of nodes and the jobs that are running on those
-		jobs, err := slurm.QueryJobsActive(cluster)
-		if err != nil {
-			trace.Error("Unable to query Slurm via squeue (is Slurm available?)")
-			break
-		}
-
-		hostToJobs := make(map[string]map[int64]bool)
-		for _, scJob := range jobs {
-			if *scJob.JobState != "RUNNING" {
-				continue
-			}
-
-			for _, alloc := range scJob.JobResources.Nodes.Allocation {
-				if hostToJobs[*alloc.Hostname] == nil {
-					hostToJobs[*alloc.Hostname] = make(map[int64]bool)
-				}
-				hostToJobs[*alloc.Hostname][int64(*scJob.JobId)] = true
-			}
-		}
-
+	for _, cluster := range api.clusterNames {
 		// Obtain various cluster stats like used CPUs, GPUs, etc.
-		stats, err := slurm.GetClusterStats(cluster)
+		ccNodeStats, err := api.slurmApi.QueryNodeStats(cluster)
 		if err != nil {
-			trace.Error("Unable to sync Slurm stats to cc-backend: %v", err)
+			return err
+		}
+
+		if ccNodeStats == nil {
 			continue
 		}
 
-		nodeStates := struct {
-			Cluster string               `json:"cluster"`
-			Nodes   []schema.NodePayload `json:"nodes"`
-		}{}
-
-		nodeStates.Cluster = cluster
-		nodeStates.Nodes = make([]schema.NodePayload, 0)
-
-		nodesMap := make(map[string]schema.NodePayload)
-
-		for _, stat := range stats {
-			for _, hostname := range stat.Nodes.Nodes {
-				node, ok := nodesMap[hostname]
-				if !ok {
-					node = schema.NodePayload{}
-				}
-
-				node.Hostname = hostname
-				// For some reason the CPU core counts are aggregated over the number of nodes
-				node.CpusAllocated = *stat.Cpus.Allocated / len(stat.Nodes.Nodes)
-				//node.CpusTotal = *stat.Cpus.Total / len(stat.Nodes.Nodes)
-				// Memory is not aggragated
-				node.MemoryAllocated = *stat.Memory.Allocated
-				//node.MemoryTotal = *stat.Memory.Maximum
-				// Neither is GRES
-				gresAlloc, errAlloc := slurm.ParseGRES(*stat.Gres.Used)
-				_, errTotal := slurm.ParseGRES(*stat.Gres.Total)
-				if errTotal == nil && errAlloc == nil {
-					//node.GpusTotal = int(gresTotal.Count)
-					node.GpusAllocated = int(gresAlloc.Count)
-				} else {
-					//node.GpusTotal = 0
-					node.GpusAllocated = 0
-				}
-
-				for _, state := range stat.Node.State {
-					if !slices.Contains(node.States, state) {
-						node.States = append(node.States, state)
-					}
-				}
-
-				nodesMap[hostname] = node
-			}
+		request := types.CCNodeStatRequest{
+			Cluster: cluster,
+			Nodes: ccNodeStats,
 		}
 
-		for _, node := range nodesMap {
-			nodeStates.Nodes = append(nodeStates.Nodes, node)
-		}
-
-		nodeStateDataJSON, err := json.Marshal(nodeStates)
+		nodeStateDataJSON, err := json.Marshal(request)
 		if err != nil {
 			return fmt.Errorf("Unable to convert NodeState to JSON: %w", err)
 		}
 
-		respNodeState, err := ccPost("/nodestate/", nodeStateDataJSON)
+		respNodeState, err := api.ccPost("/nodestate/", nodeStateDataJSON)
 		if err != nil {
 			return err
 		}
@@ -529,11 +474,11 @@ func SyncStats() error {
 		}
 	}
 
-	trace.Info("Updated CC node state on clusters %v", clusterNames)
+	trace.Info("Updated CC node state on clusters %v", api.clusterNames)
 	return nil
 }
 
-func ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
+func (api *CCApi) ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
 	trace.Debug("POST to function %s: %s", relApiUrl, string(bodyJson))
 
 	url := fmt.Sprintf("%s/api%s", config.Config.CcRestUrl, relApiUrl)
@@ -546,10 +491,10 @@ func ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-AUTH-TOKEN", config.Config.CcRestJwt)
 
-	return httpClient.Do(req)
+	return api.httpClient.Do(req)
 }
 
-func ccGet(relApiUrl string) (*http.Response, error) {
+func (api *CCApi) ccGet(relApiUrl string) (*http.Response, error) {
 	url := fmt.Sprintf("%s/api%s", config.Config.CcRestUrl, relApiUrl)
 	trace.Debug("GET to function %s", relApiUrl)
 	req, err := http.NewRequest("GET", url, nil)
@@ -561,22 +506,22 @@ func ccGet(relApiUrl string) (*http.Response, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-AUTH-TOKEN", config.Config.CcRestJwt)
 
-	return httpClient.Do(req)
+	return api.httpClient.Do(req)
 }
 
-func checkIgnoreJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) bool {
+func checkIgnoreJob(job slurm_common.SacctJob, startJobData *types.CCStartJobRequest) bool {
 	// We may want to filter out certain jobs, that shall not be submitted to cc-backend.
 	// Put more rules here if necessary.
-	trace.Debug("Checking whether job %d should be ignored", *job.JobId)
+	trace.Debug("Checking whether job %d should be ignored", job.GetJobId())
 
 	if len(startJobData.Resources) == 0 {
 		// This should only happen for jobs, which are immediately cancelled or jobs, which are still pending.
-		trace.Debug("Ignoring job %d, which has no resources associated. This job was probably never scheduled (state=%s).", *job.JobId, string(*job.State.Current))
+		trace.Debug("Ignoring job %d, which has no resources associated. This job was probably never scheduled (state=%s).", job.GetJobId(), job.GetState())
 		return true
 	}
 
 	if startJobData.StartTime == 0 {
-		trace.Debug("Ignoring job %d, which has no start time set. This job probably hasn't startet yet.", *job.JobId)
+		trace.Debug("Ignoring job %d, which has no start time set. This job probably hasn't startet yet.", job.GetJobId())
 		return true
 	}
 
@@ -584,7 +529,7 @@ func checkIgnoreJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) b
 	// Accordingly, if at least one host of the job does not match the pattern, the job
 	// is not discarded.
 	if len(config.Config.IgnoreHosts) > 0 {
-		trace.Debug("Checking job %d against ignore hosts list.", *job.JobId)
+		trace.Debug("Checking job %d against ignore hosts list.", job.GetJobId())
 		atLeastOneHostAllowed := false
 		for _, r := range startJobData.Resources {
 			// The validity of the regexp is checked on startup, so no need to check it here.
@@ -596,7 +541,7 @@ func checkIgnoreJob(job slurm.SacctJob, startJobData *types.CCStartJobRequest) b
 		}
 
 		if !atLeastOneHostAllowed {
-			trace.Debug("Ignoring job %d, which matches the hostname ignore pattern.", *job.JobId)
+			trace.Debug("Ignoring job %d, which matches the hostname ignore pattern.", job.GetJobId())
 			return true
 		}
 	}

@@ -1,4 +1,4 @@
-package slurm
+package slurm_v24xx
 
 import (
 	"bytes"
@@ -15,6 +15,7 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 
 	"github.com/ClusterCockpit/cc-lib/schema"
 )
@@ -262,10 +263,43 @@ const (
 	SLURM_MAX_VER_MIN          int    = 11
 )
 
-var (
+type slurmApi struct {
 	// We keep a cached version of the Sacct results, since we may otherwise need to execute the same sacct command multiple times per batch run
 	sacctCache map[string]map[uint32]*SacctJob
-)
+	clusterNames []string
+}
+
+func NewSlurmApi() (slurm_common.SlurmApi, error) {
+	api := &slurmApi{}
+
+	// 1. Intial cluster query
+	sacctmgrResult, err := QueryClusters()
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Is our version compatible?
+	major, _ := strconv.Atoi(string(sacctmgrResult.Meta.Slurm.Version.Major))
+	if major != 24 {
+		return nil, fmt.Errorf("Slurm backend v24xx only supports Slurm version v24.XX (found '%s'", sacctmgrResult.Meta.Slurm.Version)
+	}
+
+	// 3. Determine cluster names managed by Slurm
+	api.clusterNames = make([]string, 0)
+	for _, clusterObj := range sacctmgrResult.Clusters {
+		api.clusterNames = append(api.clusterNames, *clusterObj.Name)
+	}
+	trace.Debug("Detected Slurm clusters: %v", api.clusterNames)
+
+	if len(api.clusterNames) == 0 {
+		return nil, fmt.Errorf("Unable to determine cluster names. sacctmgr returned no clusters. Is this Slurm version compatible?")
+	}
+
+	// 4. Warn user if required Slurm permissions are not present
+	CheckPerms()
+
+	return api, nil
+}
 
 func (v *SlurmInt) UnmarshalJSON(data []byte) error {
 	// Slurm at some point has changed the representation of integers in its API.
@@ -340,9 +374,9 @@ func (v *SlurmIntString) UnmarshalJSON(data []byte) error {
 	return err
 }
 
-func JobToCcStartJob(job SacctJob) (*types.CCStartJobRequest, error) {
-	// TODO Maybe we should move this into slurm.go. We shouldn't really use slurm
-	// datastructures outside of slurm.go.
+func (api *slurmApi) JobToCCStartJob(jobCommon slurm_common.SacctJob) (*types.CCStartJobRequest, error) {
+	job := jobCommon.(*SacctJob)
+
 	scJob, err := GetScontrolJob(job)
 	if err != nil {
 		return nil, err
@@ -417,7 +451,9 @@ func JobToCcStartJob(job SacctJob) (*types.CCStartJobRequest, error) {
 	return &ccStartJob, nil
 }
 
-func JobToCcStopJob(job SacctJob) types.CCStopJobRequest {
+func (api *slurmApi) JobToCCStopJob(jobCommon slurm_common.SacctJob) (*types.CCStopJobRequest, error) {
+	job := jobCommon.(*SacctJob)
+
 	stopJob := types.CCStopJobRequest{
 		JobId:    *job.JobId,
 		Cluster:  *job.Cluster,
@@ -436,52 +472,47 @@ func JobToCcStopJob(job SacctJob) types.CCStopJobRequest {
 		trace.Debug("Altering status 'failure' to 'failed' for job %d", *job.JobId)
 		stopJob.State = "failed"
 	}
-	return stopJob
+	return &stopJob, nil
 }
 
-func GetClusterNames() ([]string, error) {
+func QueryClusters() (*SacctmgrResult, error) {
 	stdout, err := callProcess("sacctmgr", "list", "clusters", "--noheader", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("Unable to run sacctmgr to obtain cluster names: %w", err)
 	}
 
-	var result SacctmgrResult
-	err = json.Unmarshal([]byte(stdout), &result)
+	result := &SacctmgrResult{}
+	err = json.Unmarshal([]byte(stdout), result)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to parse sacctmgr output: %w", err)
 	}
 
-	clusterNames := make([]string, 0)
-	for _, clusterObj := range result.Clusters {
-		clusterNames = append(clusterNames, *clusterObj.Name)
-	}
-
-	if len(clusterNames) == 0 {
-		return nil, fmt.Errorf("Unable to determine cluster names. sacctmgr returned no clusters. Is this Slurm version compatible?")
-	}
-
-	return clusterNames, nil
+	return result, nil
 }
 
-func SacctCacheClear() {
+func (api *slurmApi) ClearJobCache() {
 	trace.Debug("Clearing Slurm sacct cache")
-	sacctCache = make(map[string]map[uint32]*SacctJob)
+	api.sacctCache = make(map[string]map[uint32]*SacctJob)
 }
 
-func slurmSacctCacheAdd(job *SacctJob) {
-	if sacctCache == nil {
-		sacctCache = make(map[string]map[uint32]*SacctJob)
+func (api *slurmApi) slurmSacctCacheAdd(job *SacctJob) {
+	if api.sacctCache == nil {
+		api.sacctCache = make(map[string]map[uint32]*SacctJob)
 	}
-	if sacctCache[*job.Cluster] == nil {
-		sacctCache[*job.Cluster] = make(map[uint32]*SacctJob)
+	if api.sacctCache[*job.Cluster] == nil {
+		api.sacctCache[*job.Cluster] = make(map[uint32]*SacctJob)
 	}
-	sacctCache[*job.Cluster][*job.JobId] = job
+	api.sacctCache[*job.Cluster][*job.JobId] = job
 }
 
-func QueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
-	if sacctCache[clusterName] != nil && sacctCache[clusterName][jobId] != nil {
+func (api *slurmApi) GetClusterNames() []string {
+	return api.clusterNames
+}
+
+func (api *slurmApi) QueryJob(clusterName string, jobId uint32) (slurm_common.SacctJob, error) {
+	if api.sacctCache[clusterName] != nil && api.sacctCache[clusterName][jobId] != nil {
 		trace.Debug("Job (%s, %d) already in cache, skipping 'sacct'", clusterName, jobId)
-		return sacctCache[clusterName][jobId], nil
+		return api.sacctCache[clusterName][jobId], nil
 	}
 
 	// Performance info: This can be fairly expensive, hence why we have some sort of caching.
@@ -497,13 +528,11 @@ func QueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	WarnVersion(result.Meta.Slurm.Version)
-
 	// When a job ID is queried, which is part of an array job, all jobs related to this array job are returned.
 	// Find the one that we actually want.
 	for _, job := range result.Jobs {
 		if *job.JobId == jobId {
-			slurmSacctCacheAdd(&job)
+			api.slurmSacctCacheAdd(&job)
 			return &job, nil
 		}
 	}
@@ -513,7 +542,7 @@ func QueryJob(clusterName string, jobId uint32) (*SacctJob, error) {
 	return nil, fmt.Errorf("Requested job (%s, %d) returned jobs, but none with our job ID: %+v", clusterName, jobId, result.Jobs)
 }
 
-func QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, error) {
+func (api *slurmApi) QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]slurm_common.SacctJob, error) {
 	starttime := begin.Format("2006-01-02T15:04:05") // e.g. '2025-02-24T15:00:00'
 	endtime := end.Format("2006-01-02T15:04:05")     // e.g. '2025-02-24T15:00:00'
 	stdout, err := callProcess("sacct", "--cluster", clusterName, "--allusers", "--starttime", starttime, "--endtime", endtime, "--json")
@@ -527,16 +556,16 @@ func QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, e
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	WarnVersion(result.Meta.Slurm.Version)
-
-	for _, job := range result.Jobs {
-		slurmSacctCacheAdd(&job)
+	sacctJobsCommon := make([]slurm_common.SacctJob, len(result.Jobs))
+	for i, job := range result.Jobs {
+		api.slurmSacctCacheAdd(&job)
+		sacctJobsCommon[i] = &job
 	}
 
-	return result.Jobs, nil
+	return sacctJobsCommon, nil
 }
 
-func QueryJobsActive(clusterName string) ([]ScontrolJob, error) {
+func (api *slurmApi) QueryJobsActive(clusterName string) ([]slurm_common.ScontrolJob, error) {
 	// Caution: it is important to use --noheader here.
 	// For multi cluster systems squeue will otherwise print non-JSON header lines.
 	stdout, err := callProcess("squeue", "--noheader", "--cluster", clusterName, "--all", "--json")
@@ -550,11 +579,15 @@ func QueryJobsActive(clusterName string) ([]ScontrolJob, error) {
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	WarnVersion(result.Meta.Slurm.Version)
-	return result.Jobs, nil
+	scontrolJobsCommon := make([]slurm_common.ScontrolJob, len(result.Jobs))
+	for i, job := range result.Jobs {
+		scontrolJobsCommon[i] = &job
+	}
+
+	return scontrolJobsCommon, nil
 }
 
-func GetScontrolJob(job SacctJob) (*ScontrolJob, error) {
+func GetScontrolJob(job *SacctJob) (*ScontrolJob, error) {
 	// Performance info: This scontrol is usually fairly quickly, since this doesn't query the slurmdbd.
 	// In my tests it was around 100 executions per second.
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId), "--json")
@@ -584,7 +617,7 @@ func GetScontrolJob(job SacctJob) (*ScontrolJob, error) {
 	return &scResult.Jobs[0], nil
 }
 
-func GetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, error) {
+func GetResources(saJob *SacctJob, scJob *ScontrolJob) ([]*schema.Resource, error) {
 	// This function fetches additional information about a Slurm job via scontrol.
 	// Unfortunately some of the information is not available via sacct, so we need
 	// scontrol to get this information. Because this information is not stored
@@ -680,7 +713,7 @@ func GetResources(saJob SacctJob, scJob *ScontrolJob) ([]*schema.Resource, error
 	return resources, nil
 }
 
-func GetNodes(job SacctJob) ([]string, error) {
+func GetNodes(job *SacctJob) ([]string, error) {
 	if strings.ToLower(*job.Nodes) == "none assigned" {
 		// Jobs, which have been cancelled before being scheduled, won't have any
 		// hostnames listed. Return an empty list in this case.
@@ -694,7 +727,7 @@ func GetNodes(job SacctJob) ([]string, error) {
 	return strings.Split(stdout, "\n"), nil
 }
 
-func GetJobInfoText(job SacctJob) string {
+func GetJobInfoText(job *SacctJob) string {
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId))
 	if err != nil {
 		// If query fails, this is most likely because the job has already ended some time ago.
@@ -710,7 +743,7 @@ func GetJobInfoText(job SacctJob) string {
 	return strings.TrimSpace(stdout)
 }
 
-func GetJobScript(job SacctJob) string {
+func GetJobScript(job *SacctJob) string {
 	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "write", "batch_script", fmt.Sprintf("%d", *job.JobId), "-")
 	if err != nil {
 		// If the job has ended some time ago, this will fail.
@@ -718,18 +751,6 @@ func GetJobScript(job SacctJob) string {
 		return ""
 	}
 	return stdout
-}
-
-func WarnVersion(ver SlurmMetaSlurmVersion) {
-	major, _ := strconv.Atoi(string(ver.Major))
-	minor, _ := strconv.Atoi(string(ver.Minor))
-	if major < SLURM_MAX_VER_MAJ {
-		return
-	}
-	if major == SLURM_MAX_VER_MAJ && minor <= SLURM_MAX_VER_MIN {
-		return
-	}
-	trace.Warn("Detected Slurm version %s.%s.%s. Last supported version is %d.%d.X. Please check if cc-slurm-adapter is working correctly. If so, bump the version number in the source to suppress this warning.", ver.Major, ver.Minor, ver.Micro, major, minor)
 }
 
 func CheckPerms() {
@@ -758,8 +779,6 @@ func CheckPerms() {
 		return
 	}
 
-	WarnVersion(result.Meta.Slurm.Version)
-
 	trace.Debug("Checking permissions for user: %s", username)
 	trace.Debug("Users returned: %s", stdout)
 
@@ -776,8 +795,8 @@ func CheckPerms() {
 	trace.Warn("sacctmgr reported that our user '%s' is not a Slurm operator. If Slurm uses relaxed permissions, this is not a problem. However, if not, NO JOBS WILL BE REPORTED! Run 'sacctmgr add user %s Account=root AdminLevel=operator'", username, username)
 }
 
-func GetClusterStats(cluster string) ([]SinfoPartial, error) {
-	trace.Debug("SlurmGetClusterStats()")
+func (api *slurmApi) QueryClusterStats(cluster string) (*SinfoResult, error) {
+	trace.Debug("QueryClusterStats()")
 
 	stdout, err := callProcess("sinfo", "--cluster", cluster, "--noheader", "--json")
 	if err != nil {
@@ -790,7 +809,61 @@ func GetClusterStats(cluster string) ([]SinfoPartial, error) {
 		return nil, fmt.Errorf("Unable to parse sinfo JSON: %w", err)
 	}
 
-	return result.Sinfo, nil
+	return &result, nil
+}
+
+func (api *slurmApi) QueryNodeStats(cluster string) ([]types.CCNodeStat, error) {
+	// Obtain various cluster stats like used CPUs, GPUs, etc.
+	stats, err := api.QueryClusterStats(cluster)
+	if err != nil {
+		trace.Error("Unable to sync Slurm stats to cc-backend: %v", err)
+		return nil, nil
+	}
+
+	ccNodeStats := make([]types.CCNodeStat, 0)
+
+	nodesMap := make(map[string]types.CCNodeStat)
+
+	for _, stat := range stats.Sinfo {
+		for _, hostname := range stat.Nodes.Nodes {
+			node, ok := nodesMap[hostname]
+			if !ok {
+				node = types.CCNodeStat{}
+			}
+
+			node.Hostname = hostname
+			// For some reason the CPU core counts are aggregated over the number of nodes
+			node.CpusAllocated = *stat.Cpus.Allocated / len(stat.Nodes.Nodes)
+			//node.CpusTotal = *stat.Cpus.Total / len(stat.Nodes.Nodes)
+			// Memory is not aggragated
+			node.MemoryAllocated = *stat.Memory.Allocated
+			//node.MemoryTotal = *stat.Memory.Maximum
+			// Neither is GRES
+			gresAlloc, errAlloc := ParseGRES(*stat.Gres.Used)
+			_, errTotal := ParseGRES(*stat.Gres.Total)
+			if errTotal == nil && errAlloc == nil {
+				//node.GpusTotal = int(gresTotal.Count)
+				node.GpusAllocated = int(gresAlloc.Count)
+			} else {
+				//node.GpusTotal = 0
+				node.GpusAllocated = 0
+			}
+
+			for _, state := range stat.Node.State {
+				if !slices.Contains(node.States, state) {
+					node.States = append(node.States, state)
+				}
+			}
+
+			nodesMap[hostname] = node
+		}
+	}
+
+	for _, node := range nodesMap {
+		ccNodeStats = append(ccNodeStats, node)
+	}
+
+	return ccNodeStats, nil
 }
 
 func ParseGRES(gres string) (*GRES, error) {
@@ -867,4 +940,36 @@ func callProcess(argv ...string) (string, error) {
 	}
 
 	return stdout.String(), nil
+}
+
+func (job *SacctJob) GetJobId() int64 {
+	return int64(*job.JobId)
+}
+
+func (job *SacctJob) GetCluster() string {
+	return *job.Cluster
+}
+
+func (job *SacctJob) GetState() string {
+	return string(*job.State.Current)
+}
+
+func (job *SacctJob) IsFinished() bool {
+	return job.Time.End.Number > 0
+}
+
+func (job *ScontrolJob) GetJobId() int64 {
+	return int64(*job.JobId)
+}
+
+func (job *ScontrolJob) GetCluster() string {
+	return *job.Cluster
+}
+
+func (job *ScontrolJob) GetState() string {
+	return string(*job.JobState)
+}
+
+func (job *ScontrolJob) IsRunning() bool {
+	return *job.JobState == "RUNNING"
 }

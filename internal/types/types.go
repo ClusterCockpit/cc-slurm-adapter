@@ -4,9 +4,6 @@ import (
 	"github.com/ClusterCockpit/cc-lib/schema"
 )
 
-// The types kind of don't belong here, since they are ClusterCockpit types.
-// However, we cannot use the 'cc' packages from the 'slurm' pacakge due to
-// cyclic dependency. Maybe we find a nicer solution in the future.
 type CCStartJobRequest schema.Job
 
 type CCStopJobRequest struct {
@@ -14,4 +11,11 @@ type CCStopJobRequest struct {
 	Cluster  string          `json:"cluster"   db:"cluster"`
 	State    schema.JobState `json:"jobState"  db:"state"`
 	StopTime int64           `json:"stopTime"  db:"stop_time"`
+}
+
+type CCNodeStat schema.NodePayload
+
+type CCNodeStatRequest struct {
+	Cluster string       `json:"cluster"`
+	Nodes   []CCNodeStat `json:"nodes"`
 }

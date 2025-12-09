@@ -18,12 +18,15 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/prep"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 )
 
 var (
 	jobEvents     []prep.SlurmctldEnv
 	slurmClusters []string
+	slurmApi      slurm_common.SlurmApi
+	ccApi         *cc.CCApi
 )
 
 func DaemonMain() error {
@@ -94,7 +97,7 @@ func DaemonMain() error {
 			}
 		case <-jobEventTimer.C:
 			trace.Info("Job Event timer triggered")
-			slurm.SacctCacheClear()
+			slurmApi.ClearJobCache()
 			jobEventsProcess()
 			if len(jobEvents) > 0 {
 				jobEventTimer.Reset(queryDelay)
@@ -110,20 +113,20 @@ func DaemonMain() error {
 				pollEventTicker.Reset(pollEventInterval)
 			}
 
-			slurm.SacctCacheClear()
-			err = cc.CacheUpdate()
+			slurmApi.ClearJobCache()
+			err = ccApi.CacheUpdate()
 			if err != nil {
 				trace.Error("Unable to update cc-backend cache. Trying later...")
 				break
 			}
-			err = cc.SyncStats()
+			err = ccApi.SyncStats()
 			if err != nil {
 				// cc-backend requires at least a version somewhere around 2025-09-10 to support stat syncing
 				trace.Error("Unable to sync stats to cc-backend. Is your cc-backend version recent enough? %v", err)
 			}
 			processSlurmSacctPoll()
 			processSlurmSqueuePoll()
-			cc.CacheGC()
+			ccApi.CacheGC()
 		}
 
 		trace.Debug("Main loop iteration complete, waiting for next event...")
@@ -135,9 +138,6 @@ func daemonInit(ctx context.Context, prepEventChan chan []byte) error {
 
 	// Assert last_run is writable. That way crash immediately instead after a long delay.
 	lastRunSet(lastRunGet())
-
-	// Verify Slurm Permissions
-	slurm.CheckPerms()
 
 	// Init Unix Socket
 	trace.Debug("Opening Socket")
@@ -161,21 +161,20 @@ func daemonInit(ctx context.Context, prepEventChan chan []byte) error {
 		return fmt.Errorf("Unable to create pid file: %w", err)
 	}
 
-	// Get the clusters managed by Slurm
-	slurmClusters, err = slurm.GetClusterNames()
-	if err != nil {
-		return fmt.Errorf("Unable to determine cluster hostnames: %w", err)
-	}
-	trace.Debug("Detected Slurm clusters: %v", slurmClusters)
-
 	// Init PrEp server
 	err = prep.ServerInit(ctx, prepEventChan)
 	if err != nil {
 		return err
 	}
 
+	// Init Slurm interface
+	slurmApi, err = slurm.NewSlurmApi()
+	if err != nil {
+		return fmt.Errorf("Unable to initialize Slurm API: %w", err)
+	}
+
 	// Init ClusterCockpit interface
-	err = cc.Init(slurmClusters)
+	ccApi, err = cc.NewCCApi(slurmClusters, slurmApi)
 	if err != nil {
 		return err
 	}
@@ -187,7 +186,7 @@ func daemonInit(ctx context.Context, prepEventChan chan []byte) error {
 
 	// Init cc job state cache
 	trace.Debug("Fetching initial job state from cc-backend")
-	err = cc.CacheUpdate()
+	err = ccApi.CacheUpdate()
 	if err != nil {
 		return fmt.Errorf("Failed to update cc-backend job cache: %w", err)
 	}
@@ -268,7 +267,7 @@ func jobEventsProcess() {
 			continue
 		}
 
-		job, err := slurm.QueryJob(jobEventCluster, uint32(jobEventId))
+		job, err := slurmApi.QueryJob(jobEventCluster, uint32(jobEventId))
 		if err != nil {
 			// We want to avoid job events getting delivered out of order.
 			// Accordingly, cancel the execution of the loop if there is an error.
@@ -284,7 +283,7 @@ func jobEventsProcess() {
 			}
 		}
 
-		err = cc.SyncJob(*job, false)
+		err = ccApi.SyncJob(job, false)
 		if err != nil {
 			trace.Warn("Syncing job (%s, %d) via PrEp hook failed (we will try again later during regular poll): %v", jobEventCluster, jobEventId, err)
 		}
@@ -317,14 +316,14 @@ func processSlurmSacctPoll() {
 	}
 
 	for _, cluster := range slurmClusters {
-		jobs, err := slurm.QueryJobsTimeRange(cluster, lastRun, thisRun)
+		jobs, err := slurmApi.QueryJobsTimeRange(cluster, lastRun, thisRun)
 		if err != nil {
 			trace.Error("Unable to query Slurm for jobs (is Slurm available?): %s", err)
 			return
 		}
 
 		for _, job := range jobs {
-			err = cc.SyncJob(job, false)
+			err = ccApi.SyncJob(job, false)
 			if err != nil {
 				trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
 				return
@@ -341,7 +340,7 @@ func processSlurmSacctPoll() {
 func processSlurmSqueuePoll() {
 	trace.Debug("processSlurmSqueuePoll()")
 	for _, cluster := range slurmClusters {
-		jobs, err := slurm.QueryJobsActive(cluster)
+		jobs, err := slurmApi.QueryJobsActive(cluster)
 		if err != nil {
 			trace.Error("Unable to query Slurm via squeue (is Slurm available?): %v", err)
 			return
@@ -349,17 +348,17 @@ func processSlurmSqueuePoll() {
 
 		slurmIsJobRunning := make(map[int64]bool)
 		for _, scJob := range jobs {
-			if strings.ToLower(string(*scJob.JobState)) != "running" {
+			if strings.ToLower(scJob.GetState()) != "running" {
 				continue
 			}
 
-			slurmIsJobRunning[int64(*scJob.JobId)] = true
+			slurmIsJobRunning[scJob.GetJobId()] = true
 		}
 
 		// Check if there are any stale jobs in cc-backend, which are no longer known to Slurm.
 		// This should usually not happen, but in the past Slurm would occasionally lie to use and we would miss
 		// job stops.
-		for jobId, cachedJobState := range cc.JobCache[cluster] {
+		for jobId, cachedJobState := range ccApi.JobCache[cluster] {
 			if !cachedJobState.Running {
 				continue
 			}
@@ -376,15 +375,15 @@ func processSlurmSqueuePoll() {
 			}
 
 			trace.Warn("Detected stale job in cc-backend (%s, %d). Trying to synchronize...", cluster, jobId)
-			job, err := slurm.QueryJob(cluster, uint32(jobId))
+			job, err := slurmApi.QueryJob(cluster, uint32(jobId))
 			if err != nil {
 				trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
 				continue
 			}
 
-			trace.Warn("Stale job state is: %s", string(*job.State.Current))
+			trace.Warn("Stale job state is: %s", job.GetState())
 
-			err = cc.SyncJob(*job, false)
+			err = ccApi.SyncJob(job, false)
 			if err != nil {
 				trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
 			}
