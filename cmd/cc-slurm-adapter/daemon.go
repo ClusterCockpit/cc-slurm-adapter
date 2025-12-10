@@ -23,9 +23,9 @@ import (
 )
 
 var (
-	jobEvents     []prep.SlurmctldEnv
-	slurmApi      slurm_common.SlurmApi
-	ccApi         *cc.CCApi
+	jobEvents []prep.SlurmctldEnv
+	slurmApi  slurm_common.SlurmApi
+	ccApi     *cc.CCApi
 )
 
 func DaemonMain() error {

@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
-	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 
 	"github.com/nats-io/nats.go"
 
@@ -30,9 +30,9 @@ type CacheJobState struct {
 const CACHE_EVICT_COUNT int = 5
 
 type CCApi struct {
-	hostname     string
-	natsConn     *nats.Conn
-	httpClient   http.Client
+	hostname   string
+	natsConn   *nats.Conn
+	httpClient http.Client
 
 	// map['clusterName'] -> map[slurmId] -> CC Job State, which are currently running (or ran recently).
 	// When a jobs is started, they are inserted into the map. When they are stopped
@@ -449,7 +449,7 @@ func (api *CCApi) SyncStats() error {
 
 		request := types.CCNodeStatRequest{
 			Cluster: cluster,
-			Nodes: ccNodeStats,
+			Nodes:   ccNodeStats,
 		}
 
 		nodeStateDataJSON, err := json.Marshal(request)

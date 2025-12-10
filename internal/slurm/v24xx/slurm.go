@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
-	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 
 	"github.com/ClusterCockpit/cc-lib/schema"
 )
@@ -265,7 +265,7 @@ const (
 
 type slurmApi struct {
 	// We keep a cached version of the Sacct results, since we may otherwise need to execute the same sacct command multiple times per batch run
-	sacctCache map[string]map[uint32]*SacctJob
+	sacctCache   map[string]map[uint32]*SacctJob
 	clusterNames []string
 }
 

@@ -3,8 +3,8 @@ package slurm
 import (
 	"fmt"
 
-	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/v24xx"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/v24xx"
 )
 
 // The interface below represents a generic interface around a specific Slurm version.
