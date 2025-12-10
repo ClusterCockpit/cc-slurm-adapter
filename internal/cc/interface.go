@@ -33,7 +33,6 @@ type CCApi struct {
 	hostname     string
 	natsConn     *nats.Conn
 	httpClient   http.Client
-	clusterNames []string
 
 	// map['clusterName'] -> map[slurmId] -> CC Job State, which are currently running (or ran recently).
 	// When a jobs is started, they are inserted into the map. When they are stopped
@@ -48,10 +47,10 @@ type CCApi struct {
 	slurmApi slurm_common.SlurmApi
 }
 
-func NewCCApi(clusterNamesInit []string, slurmApi slurm_common.SlurmApi) (*CCApi, error) {
-	ccApi := &CCApi{}
-
-	ccApi.clusterNames = clusterNamesInit
+func NewCCApi(slurmApi slurm_common.SlurmApi) (*CCApi, error) {
+	ccApi := &CCApi{
+		slurmApi: slurmApi,
+	}
 
 	// Init HTTP client
 	tr := &http.Transport{
@@ -139,7 +138,7 @@ func (api *CCApi) CacheUpdate() error {
 	initial := false
 	if api.JobCache == nil {
 		api.JobCache = make(map[string]map[int64]*CacheJobState)
-		for _, cluster := range api.clusterNames {
+		for _, cluster := range api.slurmApi.GetClusterNames() {
 			api.JobCache[cluster] = make(map[int64]*CacheJobState)
 		}
 		initial = true
@@ -437,7 +436,7 @@ func (api *CCApi) StopJob(job slurm_common.SacctJob) error {
 func (api *CCApi) SyncStats() error {
 	//slurmStateToCCSate := make(map[string]string)
 
-	for _, cluster := range api.clusterNames {
+	for _, cluster := range api.slurmApi.GetClusterNames() {
 		// Obtain various cluster stats like used CPUs, GPUs, etc.
 		ccNodeStats, err := api.slurmApi.QueryNodeStats(cluster)
 		if err != nil {
@@ -474,7 +473,7 @@ func (api *CCApi) SyncStats() error {
 		}
 	}
 
-	trace.Info("Updated CC node state on clusters %v", api.clusterNames)
+	trace.Info("Updated CC node state on clusters %v", api.slurmApi.GetClusterNames())
 	return nil
 }
 

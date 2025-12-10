@@ -24,7 +24,6 @@ import (
 
 var (
 	jobEvents     []prep.SlurmctldEnv
-	slurmClusters []string
 	slurmApi      slurm_common.SlurmApi
 	ccApi         *cc.CCApi
 )
@@ -174,7 +173,7 @@ func daemonInit(ctx context.Context, prepEventChan chan []byte) error {
 	}
 
 	// Init ClusterCockpit interface
-	ccApi, err = cc.NewCCApi(slurmClusters, slurmApi)
+	ccApi, err = cc.NewCCApi(slurmApi)
 	if err != nil {
 		return err
 	}
@@ -262,7 +261,7 @@ func jobEventsProcess() {
 		}
 
 		jobEventCluster := jobEvent.SLURM_CLUSTER_NAME
-		if !slices.Contains(slurmClusters, jobEventCluster) {
+		if !slices.Contains(slurmApi.GetClusterNames(), jobEventCluster) {
 			trace.Warn("SLURM_CLUSTER_NAME=%s is not managed by us. This should usually not happen or it means that the PrEp hook notified us about a job's cluster, which wasn't reported by 'sinfo'", jobEventCluster)
 			continue
 		}
@@ -315,7 +314,7 @@ func processSlurmSacctPoll() {
 		lastRun = lastRun.Add(-time.Duration(endOffset-beginOffset) * time.Second)
 	}
 
-	for _, cluster := range slurmClusters {
+	for _, cluster := range slurmApi.GetClusterNames() {
 		jobs, err := slurmApi.QueryJobsTimeRange(cluster, lastRun, thisRun)
 		if err != nil {
 			trace.Error("Unable to query Slurm for jobs (is Slurm available?): %s", err)
@@ -339,7 +338,7 @@ func processSlurmSacctPoll() {
 
 func processSlurmSqueuePoll() {
 	trace.Debug("processSlurmSqueuePoll()")
-	for _, cluster := range slurmClusters {
+	for _, cluster := range slurmApi.GetClusterNames() {
 		jobs, err := slurmApi.QueryJobsActive(cluster)
 		if err != nil {
 			trace.Error("Unable to query Slurm via squeue (is Slurm available?): %v", err)
