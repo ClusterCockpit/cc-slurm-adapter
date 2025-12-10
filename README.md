@@ -99,6 +99,7 @@ Most values are optional, see Reference to see which ones you really need.
     "slurmQueryDelay": 1,
     "slurmQueryMaxSpan": 604800,
     "slurmQueryMaxRetries": 5,
+    "ccPollInterval" : 21600,
     "ccRestUrl": "https://my-cc-backend-instance.example",
     "ccRestJwt": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
     "gpuPciAddrs": {
@@ -138,6 +139,7 @@ Config Key | Optional | Description
 `slurmQueryDelay`   | yes | Time (seconds) to wait between prolog/epilog event to actual synchronization. This is just for good measure to give Slurm some time to react. There should usually be no need to change this.
 `slurmQueryMaxSpan` | yes | Maximum time (seconds) cc-slurm-adapter is allowed to synchronize jobs from the past. This is to avoid accidental flooding with millions of jobs from e.g. multiple years.
 `slurmMaxRetries`   | yes | Maximum attempts Slurm should be queried upon a Prolog/Epilog event. If Slurm is reacting slow or isn't available at all, this limits the "fast" attempts to query Slurm about that job. Even if it should time out, a later occuring synchronize should still catch this job. Though, the latency from Slurm to cc-backend is increased. There should usually be no need to change this.
+`ccPollInterval`    | yes | Interval (seconds) in which all jobs are queried from cc-backend. Used to prevent stuck jobs and during normal operation this does not need to run often.
 `ccRestUrl`         | no  | The URL to cc-backend's REST API. Must not contain a trailing slash.
 `ccRestJwt`         | no  | The JWT obtained from cc-backend, which allows access to the REST API.
 `gpuPciAddrs`       | yes | Dictionary of Regexes mapping to a list of PCI addresses. If some of your nodes have GPUs, use this to map the hostnames via regex to a list of GPUs those nodes have. They have to be ordered like NVML shows them, which should hopefully be the same as `nvidia-smi` shows them, if all devices are visible.
