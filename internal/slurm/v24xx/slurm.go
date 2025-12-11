@@ -280,8 +280,8 @@ func NewSlurmApi() (slurm_common.SlurmApi, error) {
 
 	// 2. Is our version compatible?
 	major, _ := strconv.Atoi(string(sacctmgrResult.Meta.Slurm.Version.Major))
-	if major != 24 {
-		return nil, fmt.Errorf("Slurm backend v24xx only supports Slurm version v24.XX (found '%s'", sacctmgrResult.Meta.Slurm.Version)
+	if major != 24 && major != 25 {
+		return nil, fmt.Errorf("Slurm backend v24xx only supports Slurm version v24.XX and v25.XX (found '%s')", sacctmgrResult.Meta.Slurm.Version)
 	}
 
 	// 3. Determine cluster names managed by Slurm
