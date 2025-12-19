@@ -96,8 +96,10 @@ func (api *CCApi) Close() {
 	trace.Debug("Closing HTTP connections")
 	api.httpClient.CloseIdleConnections()
 	trace.Debug("Closing NATS")
-	api.natsConn.Close()
-	api.natsConn = nil
+	if api.natsConn != nil {
+		api.natsConn.Close()
+		api.natsConn = nil
+	}
 }
 
 func (api *CCApi) CacheUpdate() error {
@@ -329,7 +331,7 @@ func (api *CCApi) StartJob(job slurm_common.SacctJob, startJobData *types.CCStar
 	// Status Code 201 -> the job was newly created
 	// Status Code 422 -> the job already existed
 	// If job submission via REST is disabled, unconditionally send NATS message
-	if !config.Config.CcRestSubmitJobs || respStart.StatusCode == 201 {
+	if (!config.Config.CcRestSubmitJobs || respStart.StatusCode == 201) && api.natsConn != nil {
 		trace.Info("Sent start_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": api.hostname,
@@ -402,7 +404,7 @@ func (api *CCApi) StopJob(job slurm_common.SacctJob) error {
 		}
 	}
 
-	if !config.Config.CcRestSubmitJobs || respStop.StatusCode == 200 {
+	if (!config.Config.CcRestSubmitJobs || respStop.StatusCode == 200) && api.natsConn != nil {
 		trace.Info("Sent stop_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": api.hostname,
