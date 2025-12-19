@@ -260,12 +260,6 @@ func (api *CCApi) CacheGC() {
 }
 
 func (api *CCApi) SyncJob(job slurm_common.SacctJob, force bool) error {
-	// Assert the job exists in cc-backend. Ignore if the job already exists.
-	if config.Config.CcRestUrl == "" {
-		trace.Info("Skipping submission to ClusterCockpit REST. Missing URL. This feature is optional, so we will continue running")
-		return nil
-	}
-
 	startJobData, err := api.slurmApi.JobToCCStartJob(job)
 	if err != nil {
 		return err
@@ -312,25 +306,30 @@ func (api *CCApi) StartJob(job slurm_common.SacctJob, startJobData *types.CCStar
 		return fmt.Errorf("Unable to convert StartJobRequest to JSON: %w", err)
 	}
 
-	respStart, err := api.ccPost("/jobs/start_job/", startJobDataJSON)
-	if err != nil {
-		return err
-	}
+	var respStart *http.Response
+	if config.Config.CcRestSubmitJobs {
+		respStart, err = api.ccPost("/jobs/start_job/", startJobDataJSON)
+		if err != nil {
+			return err
+		}
 
-	defer respStart.Body.Close()
-	body, err := io.ReadAll(respStart.Body)
-	if err != nil {
-		return err
-	}
+		defer respStart.Body.Close()
 
-	if respStart.StatusCode != 201 && respStart.StatusCode != 422 {
-		// If the POST is not successful raise an error.
-		return fmt.Errorf("Calling /jobs/start_job/ (%s, %d) failed with HTTP %d: Body %s", cluster, jobId, respStart.StatusCode, string(body))
+		body, err := io.ReadAll(respStart.Body)
+		if err != nil {
+			return err
+		}
+
+		if respStart.StatusCode != 201 && respStart.StatusCode != 422 {
+			// If the POST is not successful raise an error.
+			return fmt.Errorf("Calling /jobs/start_job/ (%s, %d) failed with HTTP %d: Body %s", cluster, jobId, respStart.StatusCode, string(body))
+		}
 	}
 
 	// Status Code 201 -> the job was newly created
 	// Status Code 422 -> the job already existed
-	if respStart.StatusCode == 201 {
+	// If job submission via REST is disabled, unconditionally send NATS message
+	if !config.Config.CcRestSubmitJobs || respStart.StatusCode == 201 {
 		trace.Info("Sent start_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": api.hostname,
@@ -379,28 +378,31 @@ func (api *CCApi) StopJob(job slurm_common.SacctJob) error {
 		return fmt.Errorf("Unable to convert StopJobRequest to JSON: %w", err)
 	}
 
-	respStop, err := api.ccPost("/jobs/stop_job/", stopJobDataJSON)
-	if err != nil {
-		return err
+	var respStop *http.Response
+	if config.Config.CcRestSubmitJobs {
+		respStop, err = api.ccPost("/jobs/stop_job/", stopJobDataJSON)
+		if err != nil {
+			return err
+		}
+
+		defer respStop.Body.Close()
+		body, err := io.ReadAll(respStop.Body)
+		if err != nil {
+			return err
+		}
+
+		if respStop.StatusCode != 200 && respStop.StatusCode != 422 {
+			return fmt.Errorf("Calling /jobs/stop_job/ (cluster=%s jobid=%d known=%v running=%v) failed with HTTP %d: Body %s", cluster, jobId, jobKnown, cachedJobState.Running, respStop.StatusCode, string(body))
+		}
+
+		if respStop.StatusCode == 422 {
+			// While it should usually not occur a 422 (i.e. job was already stopped),
+			// this may still occur if something in the state was glitched.
+			trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", cluster, jobId, string(body))
+		}
 	}
 
-	defer respStop.Body.Close()
-	body, err := io.ReadAll(respStop.Body)
-	if err != nil {
-		return err
-	}
-
-	if respStop.StatusCode != 200 && respStop.StatusCode != 422 {
-		return fmt.Errorf("Calling /jobs/stop_job/ (cluster=%s jobid=%d known=%v running=%v) failed with HTTP %d: Body %s", cluster, jobId, jobKnown, cachedJobState.Running, respStop.StatusCode, string(body))
-	}
-
-	if respStop.StatusCode == 422 {
-		// While it should usually not occur a 422 (i.e. job was already stopped),
-		// this may still occur if something in the state was glitched.
-		trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", cluster, jobId, string(body))
-	}
-
-	if respStop.StatusCode == 200 {
+	if !config.Config.CcRestSubmitJobs || respStop.StatusCode == 200 {
 		trace.Info("Sent stop_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": api.hostname,

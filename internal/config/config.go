@@ -24,6 +24,7 @@ const (
 	DEFAULT_NATS_PORT    uint16 = 4222
 
 	DEFAULT_CC_POLL_INTERVAL int = 6 * 60 * 60
+	DEFAULT_CC_REST_SUBMIT_JOB bool = true
 )
 
 var (
@@ -41,6 +42,7 @@ type ProgramConfig struct {
 	SlurmMaxRetries     int                 `json:"slurmMaxRetries"`
 	CcRestUrl           string              `json:"ccRestUrl"`
 	CcRestJwt           string              `json:"ccRestJwt"`
+	CcRestSubmitJobs    bool                `json:"ccRestSubmitJobs"`
 	CcPollInterval      int                 `json:"ccPollInterval"`
 	GpuPciAddrs         map[string][]string `json:"gpuPciAddrs"`
 	IgnoreHosts         string              `json:"ignoreHosts"`
@@ -66,6 +68,7 @@ func Load(configPath string) {
 		PrepSockConnectPath: DEFAULT_PREP_SOCK_PATH,
 		LastRunPath:         DEFAULT_LAST_RUN_PATH,
 		CcPollInterval:      DEFAULT_CC_POLL_INTERVAL,
+		CcRestSubmitJobs:    DEFAULT_CC_REST_SUBMIT_JOB,
 		SlurmPollInterval:   DEFAULT_SLURM_POLL_INTERVAL,
 		SlurmQueryDelay:     DEFAULT_SLURM_QUERY_DELAY,
 		SlurmQueryMaxSpan:   DEFAULT_SLURM_QUERY_MAX_SPAN,
