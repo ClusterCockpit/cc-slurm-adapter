@@ -286,8 +286,6 @@ func (api *CCApi) SyncJob(job slurm_common.SacctJob, force bool) error {
 
 	// Only submit stop job, if it has actually finished
 	if !job.IsFinished() {
-		// A job which hasn't finished, has no end time set. This is easier than
-		// comparing against all possible job states.
 		return nil
 	}
 
