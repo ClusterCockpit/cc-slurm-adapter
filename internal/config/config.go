@@ -23,7 +23,7 @@ const (
 	DEFAULT_NATS_SUBJECT string = "jobs"
 	DEFAULT_NATS_PORT    uint16 = 4222
 
-	DEFAULT_CC_POLL_INTERVAL int = 6 * 60 * 60
+	DEFAULT_CC_POLL_INTERVAL   int  = 6 * 60 * 60
 	DEFAULT_CC_REST_SUBMIT_JOB bool = true
 )
 
