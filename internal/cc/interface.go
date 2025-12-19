@@ -89,6 +89,10 @@ func NewCCApi(slurmApi slurm_common.SlurmApi) (*CCApi, error) {
 		}
 	}
 
+	if ccApi.natsConn == nil && !config.Config.CcRestSubmitJobs {
+		return nil, fmt.Errorf("Either NATS or REST job submission must be enabled.")
+	}
+
 	return ccApi, nil
 }
 
