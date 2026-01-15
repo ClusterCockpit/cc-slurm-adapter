@@ -36,6 +36,13 @@ The jobs can still be listed in cc-backend, but showing CPU, GPU, and memory met
 
 ## Slurm Version Compatibility
 
+### Versions known to work
+
+These versions are known to work:
+
+- 24.xx.x
+- 25.xx.x
+
 ### Slurm Related Code
 
 We try to keep all Slurm related code in `slurm.go`.
