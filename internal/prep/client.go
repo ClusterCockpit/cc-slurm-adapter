@@ -56,8 +56,6 @@ type SlurmctldEnv struct {
 	SLURM_JOB_WORK_DIR                string `json:"SLURM_JOB_WORK_DIR"`
 	SLURM_SCRIPT_CONTEXT              string `json:"SLURM_SCRIPT_CONTEXT"`
 	SLURM_WCKEY                       string `json:"SLURM_WCKEY"`
-
-	SacctAttempts int `json:"-"`
 }
 
 func CollectEnvironmentValues() (SlurmctldEnv, error) {

@@ -153,21 +153,27 @@ func (api *CCApi) CacheUpdate() error {
 
 	// Create mapping from cluster -> jobid -> job from cc-backend data.
 	// Compare this mapping to our current cache to detect, if there have been differences.
-	ccJobState := make(map[string]map[int64]*schema.Job)
+	ccClusterJobState := make(map[string]map[int64]*schema.Job)
 	for _, job := range getJobsApiResponse.Jobs {
-		if ccJobState[job.Cluster] == nil {
-			ccJobState[job.Cluster] = make(map[int64]*schema.Job)
+		if ccClusterJobState[job.Cluster] == nil {
+			ccClusterJobState[job.Cluster] = make(map[int64]*schema.Job)
 		}
-		ccJobState[job.Cluster][job.JobID] = job
+		ccClusterJobState[job.Cluster][job.JobID] = job
 	}
 
 	// Now compare new cc-backend state --> our old cc-backend state
 	ccJobCount := 0
-	for _, ccJobClusterState := range ccJobState {
-		for _, ccJob := range ccJobClusterState {
+	for cluster, ccJobState := range ccClusterJobState {
+		jobIdsToQuery := make([]uint32, 0)
+
+		for _, ccJob := range ccJobState {
 			if string(ccJob.State) != "running" {
 				trace.Warn("cc-backend REST API returned job, which isn't running, even though we only asked for running jobs. Ignoring cc-job (i.e. not Slurm job) %d", ccJob.ID)
 				continue
+			}
+
+			if cluster != ccJob.Cluster {
+				trace.Fatal("BUG: Inconsistent cluster state")
 			}
 
 			if api.JobCache[ccJob.Cluster] == nil {
@@ -192,13 +198,17 @@ func (api *CCApi) CacheUpdate() error {
 				trace.Warn("Cache desync detected! Fetching running job (%s, %d) from cc-backend to cache.", ccJob.Cluster, ccJob.JobID)
 			}
 
-			slurmJob, err := api.slurmApi.QueryJob(ccJob.Cluster, uint32(ccJob.JobID))
-			if err != nil {
-				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", ccJob.Cluster, ccJob.JobID, err)
-				continue
-			}
+			jobIdsToQuery = append(jobIdsToQuery, uint32(ccJob.JobID))
+		}
 
-			api.JobCache[ccJob.Cluster][ccJob.JobID] = &CacheJobState{
+		slurmJobs, err := api.slurmApi.QueryJobs(cluster, jobIdsToQuery)
+		if err != nil {
+			trace.Error("Unable to correct desync. Slurm failed to query jobs (%s, %v): %v", cluster, jobIdsToQuery, err)
+			continue
+		}
+
+		for _, slurmJob := range slurmJobs {
+			api.JobCache[cluster][slurmJob.GetJobId()] = &CacheJobState{
 				Running: true,
 			}
 
@@ -211,8 +221,10 @@ func (api *CCApi) CacheUpdate() error {
 
 	// ... and now new cc-backend state <-- out old cc-backend state
 	for cluster, ccJobClusterCache := range api.JobCache {
+		jobIdsToQuery := make([]uint32, 0)
+
 		for jobId, cacheJob := range ccJobClusterCache {
-			_, ok := ccJobState[cluster][jobId]
+			_, ok := ccClusterJobState[cluster][jobId]
 			if !ok && !cacheJob.Running {
 				// If our local job state is not set to 'running' anymore, it's okay if cc-backend doesn't know this job.
 				ok = true
@@ -226,11 +238,17 @@ func (api *CCApi) CacheUpdate() error {
 				trace.Warn("Cache desync detected! Resetting missing/stopped job (%s, %d) from cc-backend in cache.", cluster, jobId)
 			}
 
-			slurmJob, err := api.slurmApi.QueryJob(cluster, uint32(jobId))
-			if err != nil {
-				trace.Error("Unable to correct desync. Slurm failed to query job (%s, %d): %v", cluster, jobId, err)
-				continue
-			}
+			jobIdsToQuery = append(jobIdsToQuery, uint32(jobId))
+		}
+
+		slurmJobs, err := api.slurmApi.QueryJobs(cluster, jobIdsToQuery)
+		if err != nil {
+			trace.Error("Unable to correct desync. Slurm failed to query jobs (%s, %v): %v", cluster, jobIdsToQuery, err)
+			continue
+		}
+
+		for _, slurmJob := range slurmJobs {
+			cacheJob := ccJobClusterCache[slurmJob.GetJobId()]
 
 			cacheJob.CacheEvictAge = 0
 			cacheJob.Running = false

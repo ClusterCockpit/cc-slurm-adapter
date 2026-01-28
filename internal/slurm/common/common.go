@@ -25,7 +25,7 @@ type SlurmApi interface {
 	GetClusterNames() []string
 
 	// Wrapper around sacct for single job
-	QueryJob(clusterName string, jobId uint32) (SacctJob, error)
+	QueryJobs(clusterName string, jobId []uint32) ([]SacctJob, error)
 
 	// Wrapper around sacct with time range
 	QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, error)

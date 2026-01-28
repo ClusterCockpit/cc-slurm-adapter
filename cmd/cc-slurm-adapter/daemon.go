@@ -23,9 +23,10 @@ import (
 )
 
 var (
-	jobEvents []prep.SlurmctldEnv
-	slurmApi  slurm_common.SlurmApi
-	ccApi     *cc.CCApi
+	jobEvents             []prep.SlurmctldEnv
+	jobEventSacctAttempts int
+	slurmApi              slurm_common.SlurmApi
+	ccApi                 *cc.CCApi
 )
 
 func DaemonMain() error {
@@ -244,8 +245,6 @@ func jobEventEnqueue(prepMsg []byte) error {
 		return fmt.Errorf("Unable to parse PrEp message as JSON (%w). Either a 3rd party is writing to our Unix socket or there is a bug in our IPC protocol: '%s'", err, string(prepMsg))
 	}
 
-	env.SacctAttempts = 0
-
 	jobEvents = append(jobEvents, env)
 	return nil
 }
@@ -253,7 +252,11 @@ func jobEventEnqueue(prepMsg []byte) error {
 func jobEventsProcess() {
 	trace.Debug("jobEventsProcess()")
 	newJobEvents := make([]prep.SlurmctldEnv, 0)
-	for index, jobEvent := range jobEvents {
+
+	// map[cluster]jobId
+	clusterQueries := make(map[string][]uint32, 0)
+
+	for _, jobEvent := range jobEvents {
 		jobEventId, err := strconv.ParseUint(jobEvent.SLURM_JOB_ID, 10, 32)
 		if err != nil {
 			trace.Warn("SLURM_JOB_ID contains non-integer value: %v", err)
@@ -266,25 +269,28 @@ func jobEventsProcess() {
 			continue
 		}
 
-		job, err := slurmApi.QueryJob(jobEventCluster, uint32(jobEventId))
+		clusterQueries[jobEventCluster] = append(clusterQueries[jobEventCluster], uint32(jobEventId))
+	}
+
+	for cluster, jobIds := range clusterQueries {
+		jobs, err := slurmApi.QueryJobs(cluster, jobIds)
 		if err != nil {
-			// We want to avoid job events getting delivered out of order.
-			// Accordingly, cancel the execution of the loop if there is an error.
-			// All leftover job events will get carried over to the next iteration
-			trace.Debug("Job (%s) not ready: %v", jobEvent.SLURM_JOB_ID, err)
-			jobEvents[index].SacctAttempts += 1
-			if jobEvents[index].SacctAttempts < 5 {
-				newJobEvents = append(newJobEvents, jobEvents[index:]...)
+			jobEventSacctAttempts += 1
+			if jobEventSacctAttempts > config.Config.SlurmMaxRetries {
+				trace.Warn("Jobs (%s, %v) not ready, giving up", cluster, jobIds)
+				jobEventSacctAttempts = 0
 				break
 			} else {
-				trace.Warn("Job (%d) exceeded max query retries of %d. Giving up on job.", jobEventId, config.Config.SlurmMaxRetries)
-				continue
+				trace.Debug("Jobs (%s, %v) not ready, trying later (%d/%d)", cluster, jobIds, jobEventSacctAttempts, config.Config.SlurmMaxRetries)
+				return
 			}
 		}
 
-		err = ccApi.SyncJob(job, false)
-		if err != nil {
-			trace.Warn("Syncing job (%s, %d) via PrEp hook failed (we will try again later during regular poll): %v", jobEventCluster, jobEventId, err)
+		for _, job := range jobs {
+			err := ccApi.SyncJob(job, false)
+			if err != nil {
+				trace.Warn("Syncing job (%s, %d) via PrEp hook failed (we will try again later during regular poll): %v", cluster, job.GetJobId(), err)
+			}
 		}
 	}
 
@@ -339,14 +345,14 @@ func processSlurmSacctPoll() {
 func processSlurmSqueuePoll() {
 	trace.Debug("processSlurmSqueuePoll()")
 	for _, cluster := range slurmApi.GetClusterNames() {
-		jobs, err := slurmApi.QueryJobsActive(cluster)
+		scJobs, err := slurmApi.QueryJobsActive(cluster)
 		if err != nil {
 			trace.Error("Unable to query Slurm via squeue (is Slurm available?): %v", err)
 			return
 		}
 
 		slurmIsJobRunning := make(map[int64]bool)
-		for _, scJob := range jobs {
+		for _, scJob := range scJobs {
 			if strings.ToLower(scJob.GetState()) != "running" {
 				continue
 			}
@@ -357,6 +363,8 @@ func processSlurmSqueuePoll() {
 		// Check if there are any stale jobs in cc-backend, which are no longer known to Slurm.
 		// This should usually not happen, but in the past Slurm would occasionally lie to use and we would miss
 		// job stops.
+		jobIdsToQuery := make([]uint32, 0)
+
 		for jobId, cachedJobState := range ccApi.JobCache[cluster] {
 			if !cachedJobState.Running {
 				continue
@@ -373,13 +381,17 @@ func processSlurmSqueuePoll() {
 				continue
 			}
 
-			trace.Warn("Detected stale job in cc-backend (%s, %d). Trying to synchronize...", cluster, jobId)
-			job, err := slurmApi.QueryJob(cluster, uint32(jobId))
-			if err != nil {
-				trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
-				continue
-			}
+			jobIdsToQuery = append(jobIdsToQuery, uint32(jobId))
+		}
 
+		trace.Warn("Detected stale jobs in cc-backend (%s, %v). Trying to synchronize...", cluster, jobIdsToQuery)
+		saJobs, err := slurmApi.QueryJobs(cluster, jobIdsToQuery)
+		if err != nil {
+			trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
+			continue
+		}
+
+		for _, job := range saJobs {
 			trace.Warn("Stale job state is: %s", job.GetState())
 
 			err = ccApi.SyncJob(job, false)

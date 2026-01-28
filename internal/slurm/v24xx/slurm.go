@@ -509,17 +509,34 @@ func (api *slurmApi) GetClusterNames() []string {
 	return api.clusterNames
 }
 
-func (api *slurmApi) QueryJob(clusterName string, jobId uint32) (slurm_common.SacctJob, error) {
-	if api.sacctCache[clusterName] != nil && api.sacctCache[clusterName][jobId] != nil {
-		trace.Debug("Job (%s, %d) already in cache, skipping 'sacct'", clusterName, jobId)
-		return api.sacctCache[clusterName][jobId], nil
+func (api *slurmApi) QueryJobs(clusterName string, jobIds []uint32) ([]slurm_common.SacctJob, error) {
+	retval := make([]slurm_common.SacctJob, 0)
+	jobIdStrings := make([]string, 0)
+	jobIdsToQuery := make(map[uint32]slurm_common.SacctJob)
+
+	// Determine which job IDs are in the cache
+	for _, jobId := range jobIds {
+		if api.sacctCache[clusterName] != nil && api.sacctCache[clusterName][jobId] != nil {
+			trace.Debug("Job (%s, %d) already in cache, skipping 'sacct' query", clusterName, jobId)
+			retval = append(retval, api.sacctCache[clusterName][jobId])
+		} else {
+			jobIdStrings = append(jobIdStrings, fmt.Sprintf("%d", jobId))
+			jobIdsToQuery[jobId] = nil
+		}
+	}
+
+	// If all queried job IDs are already in cache, return early. Otherwise query the rest
+	// and merge the retval
+	if len(jobIdStrings) == 0 {
+		return retval, nil
 	}
 
 	// Performance info: This can be fairly expensive, hence why we have some sort of caching.
 	// You may be able to do ~5 sacct calls per second.
-	stdout, err := callProcess("sacct", "--cluster", clusterName, "-j", fmt.Sprintf("%d", jobId), "--json")
+	jobIdString := strings.Join(jobIdStrings, ",")
+	stdout, err := callProcess("sacct", "--cluster", clusterName, "-j", jobIdString, "--json")
 	if err != nil {
-		return nil, fmt.Errorf("Unable to run sacct -j %d: %w", jobId, err)
+		return nil, fmt.Errorf("Unable to run sacct -j %s: %w", jobIdString, err)
 	}
 
 	var result SacctResult
@@ -531,15 +548,25 @@ func (api *slurmApi) QueryJob(clusterName string, jobId uint32) (slurm_common.Sa
 	// When a job ID is queried, which is part of an array job, all jobs related to this array job are returned.
 	// Find the one that we actually want.
 	for _, job := range result.Jobs {
-		if *job.JobId == jobId {
-			api.slurmSacctCacheAdd(&job)
-			return &job, nil
+		api.slurmSacctCacheAdd(&job)
+
+		// Slurm may sometimes return more jobs than initially requested (e.g. for array jobs).
+		// Ingore the jobs that were not requested.
+		if _, ok := jobIdsToQuery[*job.JobId]; !ok {
+			continue
 		}
+
+		jobIdsToQuery[*job.JobId] = &job
 	}
-	if len(result.Jobs) == 0 {
-		return nil, fmt.Errorf("Requested job (%s, %d) unavailable", clusterName, jobId)
+
+	for jobId, job := range jobIdsToQuery {
+		if job == nil {
+			return nil, fmt.Errorf("Requested job (%s, %d) unavailable", clusterName, jobId)
+		}
+		retval = append(retval, job)
 	}
-	return nil, fmt.Errorf("Requested job (%s, %d) returned jobs, but none with our job ID: %+v", clusterName, jobId, result.Jobs)
+
+	return retval, nil
 }
 
 func (api *slurmApi) QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]slurm_common.SacctJob, error) {
