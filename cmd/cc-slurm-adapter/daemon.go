@@ -79,7 +79,7 @@ func DaemonMain() error {
 		//   -> query jobs via 'sacct'
 		select {
 		case <-signalCtx.Done():
-			trace.Debug("Daemon terminating")
+			trace.Info("Daemon terminating")
 			return nil
 		case msg := <-prepEventChan:
 			trace.Debug("Process PrEp message (%d pending messages)", len(prepEventChan))
@@ -129,7 +129,7 @@ func DaemonMain() error {
 			ccApi.CacheGC()
 		}
 
-		trace.Debug("Main loop iteration complete, waiting for next event...")
+		trace.Info("Main loop iteration complete, waiting for next event...")
 	}
 }
 
@@ -384,7 +384,7 @@ func processSlurmSqueuePoll() {
 			jobIdsToQuery = append(jobIdsToQuery, uint32(jobId))
 		}
 
-		if len(jobIdsToQuery) == 0) {
+		if len(jobIdsToQuery) == 0 {
 			continue
 		}
 
