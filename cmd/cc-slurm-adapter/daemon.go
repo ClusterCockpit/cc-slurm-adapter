@@ -96,7 +96,7 @@ func DaemonMain() error {
 				jobEventPending = true
 			}
 		case <-jobEventTimer.C:
-			trace.Info("Job Event timer triggered")
+			trace.Info("Job Event timer triggered (%d events queued)", len(jobEvents))
 			slurmApi.ClearJobCache()
 			jobEventsProcess()
 			if len(jobEvents) > 0 {
