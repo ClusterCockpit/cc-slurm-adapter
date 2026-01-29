@@ -10,3 +10,7 @@ clean:
 
 format:
 	go fmt ./...
+
+update:
+	go get -u ./...
+	go mod tidy
