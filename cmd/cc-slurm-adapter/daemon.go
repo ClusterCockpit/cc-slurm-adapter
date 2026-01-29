@@ -384,6 +384,10 @@ func processSlurmSqueuePoll() {
 			jobIdsToQuery = append(jobIdsToQuery, uint32(jobId))
 		}
 
+		if len(jobIdsToQuery) == 0) {
+			continue
+		}
+
 		trace.Warn("Detected stale jobs in cc-backend (%s, %v). Trying to synchronize...", cluster, jobIdsToQuery)
 		saJobs, err := slurmApi.QueryJobs(cluster, jobIdsToQuery)
 		if err != nil {
