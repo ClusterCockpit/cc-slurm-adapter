@@ -95,6 +95,9 @@ func DaemonMain() error {
 				jobEventTimer.Reset(queryDelay)
 				jobEventPending = true
 			}
+
+			// Skip outher print statement, since we may get a lot of log spam otherwise.
+			continue
 		case <-jobEventTimer.C:
 			trace.Info("Job Event timer triggered (%d events queued)", len(jobEvents))
 			slurmApi.ClearJobCache()
