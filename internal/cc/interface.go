@@ -422,7 +422,7 @@ func (api *CCApi) StopJob(job slurm_common.SacctJob) error {
 		if respStop.StatusCode == 422 {
 			// While it should usually not occur a 422 (i.e. job was already stopped),
 			// this may still occur if something in the state was glitched.
-			trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d) failed with HTTP 422 (non-fatal): Body %s", cluster, jobId, string(body))
+			trace.Warn("Calling /jobs/stop_job/ (cluster=%s jobid=%d known=%v cachedRunningState=%v) failed with HTTP 422 (non-fatal): Body %s", cluster, jobId, jobKnown, cachedJobState.Running, string(body))
 		}
 	}
 
