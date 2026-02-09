@@ -472,17 +472,21 @@ func (api *CCApi) SyncStats() error {
 		}
 
 		// Filter out unwanted nodes
-		ccNodeStatsFiltered := make([]types.CCNodeStat, 0)
-		for _, ccNodeStat := range ccNodeStats {
-			if match, _ := regexp.MatchString(config.Config.IgnoreHosts, ccNodeStat.Hostname); !match {
-				// If the host doesn't match the ignored hosts, keep it in the list
-				ccNodeStatsFiltered = append(ccNodeStatsFiltered, ccNodeStat)
+
+		if len(config.Config.IgnoreHosts) > 0 {
+			ccNodeStatsFiltered := make([]types.CCNodeStat, 0)
+			for _, ccNodeStat := range ccNodeStats {
+				if match, _ := regexp.MatchString(config.Config.IgnoreHosts, ccNodeStat.Hostname); !match {
+					// If the host doesn't match the ignored hosts, keep it in the list
+					ccNodeStatsFiltered = append(ccNodeStatsFiltered, ccNodeStat)
+				}
 			}
+			ccNodeStats = ccNodeStatsFiltered
 		}
 
 		request := types.CCNodeStatRequest{
 			Cluster: cluster,
-			Nodes:   ccNodeStatsFiltered,
+			Nodes:   ccNodeStats,
 		}
 
 		nodeStateDataJSON, err := json.Marshal(request)
