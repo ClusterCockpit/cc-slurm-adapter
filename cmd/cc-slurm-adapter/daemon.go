@@ -72,7 +72,6 @@ func DaemonMain() error {
 
 	for {
 		printLoop := true
-		profiler.Begin()
 		// Wait for the following cases:
 		// - quit signal
 		//   -> cancel loop
@@ -85,6 +84,8 @@ func DaemonMain() error {
 			trace.Info("Daemon terminating")
 			return nil
 		case msg := <-prepEventChan:
+			profiler.Begin()
+
 			trace.Debug("Process PrEp message (%d pending messages)", len(prepEventChan))
 			err = jobEventEnqueue(msg)
 			if err != nil {
@@ -102,6 +103,8 @@ func DaemonMain() error {
 			// Skip outher print statement, since we may get a lot of log spam otherwise.
 			printLoop = false
 		case <-jobEventTimer.C:
+			profiler.Begin()
+
 			trace.Info("Job Event timer triggered (%d events queued)", len(jobEvents))
 			slurmApi.ClearJobCache()
 			jobEventsProcess()
@@ -111,6 +114,8 @@ func DaemonMain() error {
 				jobEventPending = false
 			}
 		case <-pollEventTicker.C:
+			profiler.Begin()
+
 			trace.Info("Poll Event Timer triggered")
 			if pollEventFirst {
 				// The first time, the ticker is run with very small interval, to avoid startup delay.
