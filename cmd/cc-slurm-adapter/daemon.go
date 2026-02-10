@@ -17,6 +17,7 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/cc"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/prep"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/profiler"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
@@ -70,6 +71,11 @@ func DaemonMain() error {
 	}()
 
 	for {
+		profiler.Begin()
+		defer func() {
+			profiler.End()
+			trace.Debug("%s", profiler.Report())
+		}()
 		// Wait for the following cases:
 		// - quit signal
 		//   -> cancel loop

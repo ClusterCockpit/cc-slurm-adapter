@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/profiler"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
@@ -953,6 +954,9 @@ func rangeStringToInts(rangeString string) []int {
 }
 
 func callProcess(argv ...string) (string, error) {
+	profiler.SectionBegin(fmt.Sprintf("PROCESS %s", argv[0]))
+	defer profiler.SectionEnd(fmt.Sprintf("PROCESS %s", argv[0]))
+
 	trace.Debug("Running command: %#v", argv)
 	cmd := exec.Command(argv[0], argv[1:]...)
 

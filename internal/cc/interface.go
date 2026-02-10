@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/profiler"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
@@ -515,6 +516,9 @@ func (api *CCApi) SyncStats() error {
 }
 
 func (api *CCApi) ccPost(relApiUrl string, bodyJson []byte) (*http.Response, error) {
+	profiler.SectionBegin("HTTP POST")
+	defer profiler.SectionEnd("HTTP POST")
+
 	trace.Debug("POST to function %s: %s", relApiUrl, string(bodyJson))
 
 	url := fmt.Sprintf("%s/api%s", config.Config.CcRestUrl, relApiUrl)
@@ -531,6 +535,9 @@ func (api *CCApi) ccPost(relApiUrl string, bodyJson []byte) (*http.Response, err
 }
 
 func (api *CCApi) ccGet(relApiUrl string) (*http.Response, error) {
+	profiler.SectionBegin("HTTP GET")
+	defer profiler.SectionEnd("HTTP GET")
+
 	url := fmt.Sprintf("%s/api%s", config.Config.CcRestUrl, relApiUrl)
 	trace.Debug("GET to function %s", relApiUrl)
 	req, err := http.NewRequest("GET", url, nil)
