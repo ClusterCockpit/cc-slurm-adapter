@@ -28,12 +28,20 @@ func End() {
 }
 
 func SectionBegin(name string) {
+	if sections == nil {
+		return
+	}
+
 	sections[name] = &measurement{
 		begin: time.Now(),
 	}
 }
 
 func SectionEnd(name string) {
+	if sections == nil {
+		return
+	}
+
 	sections[name].duration += time.Now().Sub(sections[name].begin)
 }
 
