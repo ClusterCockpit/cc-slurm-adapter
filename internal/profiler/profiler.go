@@ -10,18 +10,18 @@ import (
 )
 
 type measurement struct {
-	name     string
-	count    int
+	name  string
+	count int
 
-	begin    time.Time
-	total    time.Duration
+	begin time.Time
+	total time.Duration
 
-	children  map[string]*measurement
+	children map[string]*measurement
 	parent   *measurement
 }
 
 var (
-	root measurement
+	root       measurement
 	curSection *measurement
 )
 
@@ -47,10 +47,10 @@ func SectionBegin(name string) {
 
 	if curSection.children[name] == nil {
 		curSection.children[name] = &measurement{
-			name: name,
-			total: time.Duration(0),
+			name:     name,
+			total:    time.Duration(0),
 			children: make(map[string]*measurement),
-			parent: curSection,
+			parent:   curSection,
 		}
 	}
 
@@ -70,7 +70,7 @@ func SectionEnd(name string) {
 	curSection.total += time.Now().Sub(curSection.begin)
 	curSection.count += 1
 
-	if (curSection.parent == nil) {
+	if curSection.parent == nil {
 		trace.Fatal("Forcing SectionEnd on root section 'Total' is not allowed")
 	}
 
@@ -88,8 +88,8 @@ func reportMeasurement(m *measurement, indent string) string {
 
 	if len(m.children) > 0 {
 		childrenSorted = append(childrenSorted, &measurement{
-			name:        "<other>",
-			total: m.total - childrenTotal,
+			name:   "<other>",
+			total:  m.total - childrenTotal,
 			parent: m,
 		})
 	}
@@ -106,7 +106,7 @@ func reportMeasurement(m *measurement, indent string) string {
 	result := fmt.Sprintf("\n%s- %s: %s%.5f sec", indent, m.name, callCountString, m.total.Seconds())
 	if len(childrenSorted) > 0 {
 		for _, child := range childrenSorted {
-			result += reportMeasurement(child, indent + "  ")
+			result += reportMeasurement(child, indent+"  ")
 		}
 	}
 	return result
