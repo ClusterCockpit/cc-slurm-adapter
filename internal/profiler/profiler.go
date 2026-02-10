@@ -11,6 +11,7 @@ import (
 
 type measurement struct {
 	name     string
+	count    int
 
 	begin    time.Time
 	total    time.Duration
@@ -67,6 +68,7 @@ func SectionEnd(name string) {
 	}
 
 	curSection.total += time.Now().Sub(curSection.begin)
+	curSection.count += 1
 
 	if (curSection.parent == nil) {
 		trace.Fatal("Forcing SectionEnd on root section 'Total' is not allowed")
@@ -96,7 +98,12 @@ func reportMeasurement(m *measurement, indent string) string {
 		return -cmp.Compare(a.total, b.total)
 	})
 
-	result := fmt.Sprintf("\n%s- %s: %.5f sec", indent, m.name, m.total.Seconds())
+	callCountString := ""
+	if m.count > 0 {
+		callCountString = fmt.Sprintf("%d calls, ", m.count)
+	}
+
+	result := fmt.Sprintf("\n%s- %s: %s%.5f sec", indent, m.name, callCountString, m.total.Seconds())
 	if len(childrenSorted) > 0 {
 		for _, child := range childrenSorted {
 			result += reportMeasurement(child, indent + "  ")
