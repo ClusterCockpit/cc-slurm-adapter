@@ -46,15 +46,15 @@ func SectionEnd(name string) {
 }
 
 func Report() string {
-	result := fmt.Sprintf("Total time: %.5f", total.duration.Seconds())
+	result := fmt.Sprintf("Total time: %.5f sec", total.duration.Seconds())
 
 	timeSections := time.Duration(0)
 
 	for name, section := range sections {
 		timeSections += section.duration
-		result += fmt.Sprintf("\n- %s: %.5f", name, section.duration.Seconds())
+		result += fmt.Sprintf("\n- %s: %.5f sec", name, section.duration.Seconds())
 	}
 
-	result += fmt.Sprintf("\n- <other>: %.5f", (total.duration - timeSections).Seconds())
+	result += fmt.Sprintf("\n- <other>: %.5f sec", (total.duration - timeSections).Seconds())
 	return result
 }
