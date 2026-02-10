@@ -71,11 +71,8 @@ func DaemonMain() error {
 	}()
 
 	for {
+		printLoop := true
 		profiler.Begin()
-		defer func() {
-			profiler.End()
-			trace.Debug("%s", profiler.Report())
-		}()
 		// Wait for the following cases:
 		// - quit signal
 		//   -> cancel loop
@@ -103,7 +100,7 @@ func DaemonMain() error {
 			}
 
 			// Skip outher print statement, since we may get a lot of log spam otherwise.
-			continue
+			printLoop = false
 		case <-jobEventTimer.C:
 			trace.Info("Job Event timer triggered (%d events queued)", len(jobEvents))
 			slurmApi.ClearJobCache()
@@ -138,7 +135,12 @@ func DaemonMain() error {
 			ccApi.CacheGC()
 		}
 
-		trace.Info("Main loop iteration complete, waiting for next event...")
+		if printLoop {
+			trace.Info("Main loop iteration complete, waiting for next event...")
+		}
+
+		profiler.End()
+		trace.Debug("%s", profiler.Report())
 	}
 }
 
