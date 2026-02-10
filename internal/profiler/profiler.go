@@ -1,12 +1,12 @@
 package profiler
 
 import (
-	"time"
 	"fmt"
+	"time"
 )
 
 type measurement struct {
-	begin time.Time
+	begin    time.Time
 	duration time.Duration
 }
 
