@@ -5,79 +5,106 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 )
 
 type measurement struct {
-	begin    time.Time
-	duration time.Duration
-}
+	name     string
 
-type namedMeasurement struct {
-	name string
-	measurement
+	begin    time.Time
+	total    time.Duration
+
+	children  map[string]*measurement
+	parent   *measurement
 }
 
 var (
-	total measurement
-
-	sections map[string]*measurement
+	root measurement
+	curSection *measurement
 )
 
 func Begin() {
-	total.begin = time.Now()
-	total.duration = time.Duration(0)
+	root.name = "Total"
 
-	sections = make(map[string]*measurement)
+	root.begin = time.Now()
+	root.total = time.Duration(0)
+
+	root.children = make(map[string]*measurement)
+	root.parent = nil
+	curSection = &root
 }
 
 func End() {
-	total.duration = time.Now().Sub(total.begin)
+	root.total = time.Now().Sub(root.begin)
 }
 
 func SectionBegin(name string) {
-	if sections == nil {
+	if curSection == nil {
 		return
 	}
 
-	sections[name] = &measurement{
-		begin: time.Now(),
+	if curSection.children[name] == nil {
+		curSection.children[name] = &measurement{
+			name: name,
+			total: time.Duration(0),
+			children: make(map[string]*measurement),
+			parent: curSection,
+		}
 	}
+
+	curSection.children[name].begin = time.Now()
+	curSection = curSection.children[name]
 }
 
 func SectionEnd(name string) {
-	if sections == nil {
+	if curSection == nil {
 		return
 	}
 
-	sections[name].duration += time.Now().Sub(sections[name].begin)
+	if curSection.name != name {
+		trace.Fatal("Profiler section ended with '%s', but started with '%s'", name, curSection.name)
+	}
+
+	curSection.total += time.Now().Sub(curSection.begin)
+
+	if (curSection.parent == nil) {
+		trace.Fatal("Forcing SectionEnd on root section 'Total' is not allowed")
+	}
+
+	curSection = curSection.parent
 }
 
-func Report() string {
-	sectionsSorted := make([]*namedMeasurement, 0)
+func reportMeasurement(m *measurement, indent string) string {
+	childrenSorted := make([]*measurement, 0)
+	childrenTotal := time.Duration(0)
 
-	timeSections := time.Duration(0)
+	for _, child := range m.children {
+		childrenTotal += child.total
+		childrenSorted = append(childrenSorted, child)
+	}
 
-	for name, section := range sections {
-		timeSections += section.duration
-
-		sectionsSorted = append(sectionsSorted, &namedMeasurement{
-			name:        name,
-			measurement: *section,
+	if len(m.children) > 0 {
+		childrenSorted = append(childrenSorted, &measurement{
+			name:        "<other>",
+			total: m.total - childrenTotal,
+			parent: m,
 		})
 	}
 
-	sectionsSorted = append(sectionsSorted, &namedMeasurement{
-		name:        "<other>",
-		measurement: measurement{duration: total.duration - timeSections},
+	slices.SortFunc(childrenSorted, func(a, b *measurement) int {
+		return -cmp.Compare(a.total, b.total)
 	})
 
-	slices.SortFunc(sectionsSorted, func(a, b *namedMeasurement) int {
-		return -cmp.Compare(a.duration, b.duration)
-	})
-
-	result := fmt.Sprintf("Total time: %.5f sec", total.duration.Seconds())
-	for _, v := range sectionsSorted {
-		result += fmt.Sprintf("\n- %s: %.5f sec", v.name, v.duration.Seconds())
+	result := fmt.Sprintf("\n%s- %s: %.5f sec", indent, m.name, m.total.Seconds())
+	if len(childrenSorted) > 0 {
+		for _, child := range childrenSorted {
+			result += reportMeasurement(child, indent + "  ")
+		}
 	}
 	return result
+}
+
+func Report() string {
+	return reportMeasurement(&root, "")
 }
