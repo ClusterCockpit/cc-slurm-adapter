@@ -4,20 +4,40 @@ import (
 	"time"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
+
+	"github.com/ClusterCockpit/cc-lib/schema"
 )
 
-type SacctJob interface {
+type Job interface {
+	// TODO document, what those do exactly
 	GetJobId() int64
 	GetCluster() string
+	GetPartition() string
+	GetName() string
+	GetUser() string
+	GetGroup() string
+	GetAccount() string
+
 	GetState() string
 	IsFinished() bool
-}
+	GetSubmitTime() time.Time
+	GetStartTime() time.Time
+	GetEndTime() time.Time
+	GetTimeLimit() time.Duration
 
-type ScontrolJob interface {
-	GetJobId() int64
-	GetCluster() string
-	GetState() string
-	IsRunning() bool
+	GetResources() ([]*schema.Resource, error)
+	GetJobScript() string
+	GetSlurmInfo() string
+
+	GetArrayJobId() int64
+	GetNumNodes() int32
+	GetNumHWThreads() int32
+	GetNumAccelerators() int32
+	GetNodeShared() string
+
+	// TODO, perhaps give those below more meaningful names
+	HasResourceInfo() bool
+	HasDbInfo() bool
 }
 
 type SlurmApi interface {
@@ -25,23 +45,17 @@ type SlurmApi interface {
 	GetClusterNames() []string
 
 	// Wrapper around sacct for single job
-	QueryJobs(clusterName string, jobId []uint32) ([]SacctJob, error)
+	QueryJobs(clusterName string, jobId []int64) ([]Job, error)
 
 	// Wrapper around sacct with time range
-	QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]SacctJob, error)
+	QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]Job, error)
 
 	// Wrapper around squeue
-	QueryJobsActive(clusterName string) ([]ScontrolJob, error)
+	QueryJobsActive(clusterName string) ([]Job, error)
+
+	// Wrapper around squeue for existing job list
+	QueryJobsWithResources(clusterName string, jobs []Job) error
 
 	// Wrapper around sinfo
 	QueryNodeStats(clusterName string) ([]types.CCNodeStat, error)
-
-	// Whenever QueryJob is called, the job is cached. This function resets it
-	ClearJobCache()
-
-	// Convert a job retrieved via QueryJob to a ClusterCockpit start_job request
-	JobToCCStartJob(job SacctJob) (*types.CCStartJobRequest, error)
-
-	// Convert a job retrieved via QueryJob to a ClusterCockpit stop_job request
-	JobToCCStopJob(job SacctJob) (*types.CCStopJobRequest, error)
 }

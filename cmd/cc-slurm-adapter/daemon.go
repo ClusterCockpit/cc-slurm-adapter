@@ -106,7 +106,6 @@ func DaemonMain() error {
 			profiler.Begin()
 
 			trace.Info("Job Event timer triggered (%d events queued)", len(jobEvents))
-			slurmApi.ClearJobCache()
 			jobEventsProcess()
 			if len(jobEvents) > 0 {
 				jobEventTimer.Reset(queryDelay)
@@ -124,7 +123,6 @@ func DaemonMain() error {
 				pollEventTicker.Reset(pollEventInterval)
 			}
 
-			slurmApi.ClearJobCache()
 			err = ccApi.CacheUpdate()
 			if err != nil {
 				trace.Error("Unable to update cc-backend cache. Trying later...")
@@ -270,10 +268,10 @@ func jobEventsProcess() {
 	newJobEvents := make([]prep.SlurmctldEnv, 0)
 
 	// map[cluster]jobId
-	clusterQueries := make(map[string][]uint32, 0)
+	clusterQueries := make(map[string][]int64, 0)
 
 	for _, jobEvent := range jobEvents {
-		jobEventId, err := strconv.ParseUint(jobEvent.SLURM_JOB_ID, 10, 32)
+		jobEventId, err := strconv.ParseInt(jobEvent.SLURM_JOB_ID, 10, 64)
 		if err != nil {
 			trace.Warn("SLURM_JOB_ID contains non-integer value: %v", err)
 			continue
@@ -285,7 +283,7 @@ func jobEventsProcess() {
 			continue
 		}
 
-		clusterQueries[jobEventCluster] = append(clusterQueries[jobEventCluster], uint32(jobEventId))
+		clusterQueries[jobEventCluster] = append(clusterQueries[jobEventCluster], jobEventId)
 	}
 
 	for cluster, jobIds := range clusterQueries {
@@ -302,11 +300,9 @@ func jobEventsProcess() {
 			}
 		}
 
-		for _, job := range jobs {
-			err := ccApi.SyncJob(job, false)
-			if err != nil {
-				trace.Warn("Syncing job (%s, %d) via PrEp hook failed (we will try again later during regular poll): %v", cluster, job.GetJobId(), err)
-			}
+		err = ccApi.SyncJobs(cluster, jobs, false)
+		if err != nil {
+			trace.Warn("Syncing job (%s, %v) via PrEp hook failed (we will try again later during regular poll): %v", cluster, jobIdsOfJobs(jobs), err)
 		}
 	}
 
@@ -343,12 +339,10 @@ func processSlurmSacctPoll() {
 			return
 		}
 
-		for _, job := range jobs {
-			err = ccApi.SyncJob(job, false)
-			if err != nil {
-				trace.Error("Syncing job to ClusterCockpit failed (%s). Trying later...", err)
-				return
-			}
+		err = ccApi.SyncJobs(cluster, jobs, false)
+		if err != nil {
+			trace.Error("Syncing job (%s, %v) to ClusterCockpit failed (%s). Trying later...", cluster, jobIdsOfJobs(jobs), err)
+			return
 		}
 
 		if len(jobs) > 0 {
@@ -379,7 +373,7 @@ func processSlurmSqueuePoll() {
 		// Check if there are any stale jobs in cc-backend, which are no longer known to Slurm.
 		// This should usually not happen, but in the past Slurm would occasionally lie to use and we would miss
 		// job stops.
-		jobIdsToQuery := make([]uint32, 0)
+		jobIdsToQuery := make([]int64, 0)
 
 		for jobId, cachedJobState := range ccApi.JobCache[cluster] {
 			if !cachedJobState.Running {
@@ -397,7 +391,7 @@ func processSlurmSqueuePoll() {
 				continue
 			}
 
-			jobIdsToQuery = append(jobIdsToQuery, uint32(jobId))
+			jobIdsToQuery = append(jobIdsToQuery, jobId)
 		}
 
 		if len(jobIdsToQuery) == 0 {
@@ -405,21 +399,29 @@ func processSlurmSqueuePoll() {
 		}
 
 		trace.Warn("Detected stale jobs in cc-backend (%s, %v). Trying to synchronize...", cluster, jobIdsToQuery)
-		saJobs, err := slurmApi.QueryJobs(cluster, jobIdsToQuery)
+		jobs, err := slurmApi.QueryJobs(cluster, jobIdsToQuery)
 		if err != nil {
 			trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
 			continue
 		}
 
-		for _, job := range saJobs {
-			trace.Warn("Stale job state is: %s", job.GetState())
+		for _, job := range jobs {
+			trace.Warn("Queuing sync of stale job (%s, %d), which is in state '%s'", job.GetCluster(), job.GetJobId(), job.GetState())
+		}
 
-			err = ccApi.SyncJob(job, false)
-			if err != nil {
-				trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
-			}
+		err = ccApi.SyncJobs(cluster, jobs, false)
+		if err != nil {
+			trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
 		}
 	}
+}
+
+func jobIdsOfJobs(jobs []slurm_common.Job) []int64 {
+	result := make([]int64, len(jobs))
+	for i, job := range jobs {
+		result[i] = job.GetJobId()
+	}
+	return result
 }
 
 func lastRunGet() time.Time {
