@@ -18,6 +18,7 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
 
+	"github.com/ClusterCockpit/cc-backend/pkg/archive"
 	"github.com/ClusterCockpit/cc-lib/schema"
 )
 
@@ -549,19 +550,18 @@ func (api *slurmApi) QueryJobsWithResources(clusterName string, jobs []slurm_com
 }
 
 func GetNodes(job *SacctJob) ([]string, error) {
-	// TODO, rewrite this, generate this without external call to make it less expensive!
-
 	if strings.ToLower(*job.Nodes) == "none assigned" {
 		// Jobs, which have been cancelled before being scheduled, won't have any
 		// hostnames listed. Return an empty list in this case.
 		return make([]string, 0), nil
 	}
-	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "hostnames", *job.Nodes)
+
+	nodeList, err := archive.ParseNodeList(*job.Nodes)
 	if err != nil {
-		return nil, fmt.Errorf("scontrol show hostnames '%s' failed: %w (%s)", *job.Nodes, err, stdout)
+		return nil, fmt.Errorf("Unable to resolve hostname list '%s': %w", *job.Nodes, err)
 	}
-	stdout = strings.TrimSpace(stdout)
-	return strings.Split(stdout, "\n"), nil
+
+	return nodeList.PrintList(), nil
 }
 
 func CheckPerms() {

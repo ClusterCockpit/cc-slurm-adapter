@@ -287,6 +287,8 @@ func jobEventsProcess() {
 	}
 
 	for cluster, jobIds := range clusterQueries {
+		// Strictly speaking, QueryJobs does an sacct call for the job list, which becomes
+		// redundant once we do the squeue call on the job list later. This could be optimized.
 		jobs, err := slurmApi.QueryJobs(cluster, jobIds)
 		if err != nil {
 			jobEventSacctAttempts += 1
