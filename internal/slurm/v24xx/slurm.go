@@ -415,6 +415,11 @@ func (api *slurmApi) GetClusterNames() []string {
 
 func (api *slurmApi) QueryJobs(clusterName string, jobIds []int64) ([]slurm_common.Job, error) {
 	retval := make([]slurm_common.Job, 0)
+
+	if len(jobIds) == 0 {
+		return retval, nil
+	}
+
 	jobIdStrings := make([]string, 0)
 
 	jobQueries := make(map[int64]*Job)
@@ -503,6 +508,10 @@ func (api *slurmApi) QueryJobsActive(clusterName string) ([]slurm_common.Job, er
 }
 
 func (api *slurmApi) QueryJobsWithResources(clusterName string, jobs []slurm_common.Job) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+
 	jobIdStrings := make([]string, 0)
 	jobMap := make(map[int64]slurm_common.Job)
 
