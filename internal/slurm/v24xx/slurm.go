@@ -18,7 +18,8 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
 
-	"github.com/ClusterCockpit/cc-lib/schema"
+	"github.com/ClusterCockpit/cc-lib/v2/hostlist"
+	"github.com/ClusterCockpit/cc-lib/v2/schema"
 )
 
 // SlurmInt supports these two JSON layouts:
@@ -62,20 +63,32 @@ type ScontrolJobResourcesNodes struct {
 
 type ScontrolJobResources struct {
 	Nodes          *ScontrolJobResourcesNodes `json:"nodes"`
-	CPUs           *SlurmInt                  `json:"cpus"`
 	ThreadsPerCore *SlurmInt                  `json:"threads_per_core"`
 }
 
 type ScontrolJob struct {
 	// Only (our) required fields are listed here.
-	JobId        *uint32               `json:"job_id"`
+	JobId        *int64                `json:"job_id"`
 	JobResources *ScontrolJobResources `json:"job_resources"`
 	JobState     *SlurmString          `json:"job_state"`
 	Comment      *string               `json:"comment"`
 	Cluster      *string               `json:"cluster"`
+	Partition    *string               `json:"partition"`
+	Name         *string               `json:"name"`
+	UserName     *string               `json:"user_name"`
+	GroupName    *string               `json:"group_name"`
+	Account      *string               `json:"account"`
 	GresDetail   []string              `json:"gres_detail"`
 	Shared       *SlurmString          `json:"shared"`
 	Exclusive    *SlurmString          `json:"exclusive"`
+	SubmitTime   *SlurmInt             `json:"submit_time"`
+	StartTime    *SlurmInt             `json:"start_time"`
+	EndTime      *SlurmInt             `json:"end_time"`
+	TimeLimit    *SlurmInt             `json:"time_limit"`
+	ArrayJobId   *SlurmInt             `json:"array_job_id"`
+	TresReqStr   *string               `json:"tres_req_str"`
+	TresAllocStr *string               `json:"tres_alloc_str"`
+	CPUs         *SlurmInt             `json:"cpus"`
 }
 
 type ScontrolResult struct {
@@ -89,7 +102,7 @@ type SacctJobState struct {
 
 type SacctJobArray struct {
 	// Only (our) required fields are listed here.
-	JobId *uint32 `json:"job_id"`
+	JobId *int64 `json:"job_id"`
 }
 
 type SlurmTresCount uint64
@@ -142,7 +155,7 @@ type SacctJob struct {
 	AllocationNodes *SlurmInt         `json:"allocation_nodes"`
 	Array           *SacctJobArray    `json:"array"`
 	Cluster         *string           `json:"cluster"`
-	JobId           *uint32           `json:"job_id"`
+	JobId           *int64            `json:"job_id"`
 	Name            *string           `json:"name"`
 	Partition       *string           `json:"partition"`
 	Required        *SacctJobRequired `json:"required"`
@@ -150,6 +163,7 @@ type SacctJob struct {
 	Time            *SacctJobTime     `json:"time"`
 	Script          *string           `json:"script"`
 	User            *string           `json:"user"`
+	Group           *string           `json:"group"`
 	Nodes           *string           `json:"nodes"`
 	Tres            *SacctJobTresList `json:"tres"`
 }
@@ -258,6 +272,14 @@ type GRES struct {
 	DomainIndices []int
 }
 
+type Job struct {
+	sa *SacctJob
+	sc *ScontrolJob
+
+	jobScript *string
+	slurmInfo *string
+}
+
 const (
 	SLURM_VERSION_INCOMPATIBLE string = "Unable to parse sacct JSON. Is cc-slurm-adapter compatible with this Slurm version?"
 	SLURM_MAX_VER_MAJ          int    = 24
@@ -265,8 +287,6 @@ const (
 )
 
 type slurmApi struct {
-	// We keep a cached version of the Sacct results, since we may otherwise need to execute the same sacct command multiple times per batch run
-	sacctCache   map[string]map[uint32]*SacctJob
 	clusterNames []string
 }
 
@@ -375,107 +395,6 @@ func (v *SlurmIntString) UnmarshalJSON(data []byte) error {
 	return err
 }
 
-func (api *slurmApi) JobToCCStartJob(jobCommon slurm_common.SacctJob) (*types.CCStartJobRequest, error) {
-	job := jobCommon.(*SacctJob)
-
-	scJob, err := GetScontrolJob(job)
-	if err != nil {
-		return nil, err
-	}
-
-	resources, err := GetResources(job, scJob)
-	if err != nil {
-		// This error should only occur for criticial errors.
-		// Non critical errors won't enter this case.
-		return nil, err
-	}
-
-	metaData := make(map[string]string)
-	jobScript := GetJobScript(job)
-	if jobScript != "" {
-		metaData["jobScript"] = jobScript
-	}
-	metaData["jobName"] = *job.Name
-	metaData["slurmInfo"] = GetJobInfoText(job)
-	metaData["submitTime"] = fmt.Sprintf("%v", job.Time.Submission.Number)
-
-	shared := "multi_user"
-	if scJob != nil {
-		if scJob.Exclusive != nil && string(*scJob.Exclusive) == "true" {
-			shared = "none"
-		} else if scJob.Shared != nil {
-			if string(*scJob.Shared) == "user" {
-				shared = "single_user"
-			} else if string(*scJob.Shared) == "none" {
-				shared = "none"
-			} else if string(*scJob.Shared) == "" {
-				shared = "multi_user"
-			}
-		} else {
-			trace.Debug("No information available about exclusive/shared for job %d.", *job.JobId)
-		}
-	}
-
-	ccStartJob := types.CCStartJobRequest{
-		Cluster:      *job.Cluster,
-		Partition:    *job.Partition,
-		Project:      *job.Account,
-		ArrayJobID:   int64(*job.Array.JobId),
-		NumNodes:     int32(job.AllocationNodes.Number),
-		NumHWThreads: int32(job.Required.CPUs.Number),
-		Shared:       shared,
-		Walltime:     job.Time.Limit.Number * 60, // slurm reports the limit in MINUTES, not seconds
-		Resources:    resources,
-		MetaData:     metaData,
-		JobID:        int64(*job.JobId),
-		User:         *job.User,
-		StartTime:    job.Time.Start.Number,
-	}
-
-	// Determine number of CPUs and accelerators. Use requested values
-	// as base, and use allocated values, if available.
-	setResources := func(tresList []SacctJobTres, ccStartJob *types.CCStartJobRequest) {
-		for _, tres := range tresList {
-			if *tres.Type == "cpu" {
-				ccStartJob.NumHWThreads = int32(*tres.Count)
-			}
-
-			if *tres.Type == "gres" && *tres.Name == "gpu" {
-				ccStartJob.NumAcc = int32(*tres.Count)
-			}
-		}
-	}
-
-	setResources(job.Tres.Requested, &ccStartJob)
-	setResources(job.Tres.Allocated, &ccStartJob)
-
-	return &ccStartJob, nil
-}
-
-func (api *slurmApi) JobToCCStopJob(jobCommon slurm_common.SacctJob) (*types.CCStopJobRequest, error) {
-	job := jobCommon.(*SacctJob)
-
-	stopJob := types.CCStopJobRequest{
-		JobId:    *job.JobId,
-		Cluster:  *job.Cluster,
-		State:    schema.JobState(strings.ToLower(string(*job.State.Current))),
-		StopTime: job.Time.End.Number,
-	}
-
-	// WORKAROUNDS due to cc-backend's lack of support for them.
-	// Ideally this should be removed in the future.
-	if stopJob.State == "node_fail" {
-		trace.Warn("Altering status 'node_fail' to 'failure' for job %d. If this is finally supported in cc-backend, the code generating this message can be removed", *job.JobId)
-		stopJob.State = "failure"
-	}
-
-	if stopJob.State == "failure" {
-		trace.Debug("Altering status 'failure' to 'failed' for job %d", *job.JobId)
-		stopJob.State = "failed"
-	}
-	return &stopJob, nil
-}
-
 func QueryClusters() (*SacctmgrResult, error) {
 	stdout, err := callProcess("sacctmgr", "list", "clusters", "--noheader", "--json")
 	if err != nil {
@@ -491,49 +410,25 @@ func QueryClusters() (*SacctmgrResult, error) {
 	return result, nil
 }
 
-func (api *slurmApi) ClearJobCache() {
-	trace.Debug("Clearing Slurm sacct cache")
-	api.sacctCache = make(map[string]map[uint32]*SacctJob)
-}
-
-func (api *slurmApi) slurmSacctCacheAdd(job *SacctJob) {
-	if api.sacctCache == nil {
-		api.sacctCache = make(map[string]map[uint32]*SacctJob)
-	}
-	if api.sacctCache[*job.Cluster] == nil {
-		api.sacctCache[*job.Cluster] = make(map[uint32]*SacctJob)
-	}
-	api.sacctCache[*job.Cluster][*job.JobId] = job
-}
-
 func (api *slurmApi) GetClusterNames() []string {
 	return api.clusterNames
 }
 
-func (api *slurmApi) QueryJobs(clusterName string, jobIds []uint32) ([]slurm_common.SacctJob, error) {
-	retval := make([]slurm_common.SacctJob, 0)
-	jobIdStrings := make([]string, 0)
-	jobIdsToQuery := make(map[uint32]slurm_common.SacctJob)
+func (api *slurmApi) QueryJobs(clusterName string, jobIds []int64) ([]slurm_common.Job, error) {
+	retval := make([]slurm_common.Job, 0)
 
-	// Determine which job IDs are in the cache
-	for _, jobId := range jobIds {
-		if api.sacctCache[clusterName] != nil && api.sacctCache[clusterName][jobId] != nil {
-			trace.Debug("Job (%s, %d) already in cache, skipping 'sacct' query", clusterName, jobId)
-			retval = append(retval, api.sacctCache[clusterName][jobId])
-		} else {
-			jobIdStrings = append(jobIdStrings, fmt.Sprintf("%d", jobId))
-			jobIdsToQuery[jobId] = nil
-		}
-	}
-
-	// If all queried job IDs are already in cache, return early. Otherwise query the rest
-	// and merge the retval
-	if len(jobIdStrings) == 0 {
+	if len(jobIds) == 0 {
 		return retval, nil
 	}
 
-	// Performance info: This can be fairly expensive, hence why we have some sort of caching.
-	// You may be able to do ~5 sacct calls per second.
+	jobIdStrings := make([]string, 0)
+
+	jobQueries := make(map[int64]*Job)
+	for _, jobId := range jobIds {
+		jobQueries[jobId] = &Job{}
+		jobIdStrings = append(jobIdStrings, fmt.Sprintf("%d", jobId))
+	}
+
 	jobIdString := strings.Join(jobIdStrings, ",")
 	stdout, err := callProcess("sacct", "--cluster", clusterName, "-j", jobIdString, "--json")
 	if err != nil {
@@ -547,20 +442,19 @@ func (api *slurmApi) QueryJobs(clusterName string, jobIds []uint32) ([]slurm_com
 	}
 
 	// When a job ID is queried, which is part of an array job, all jobs related to this array job are returned.
-	// Find the one that we actually want.
+	// Find the one that we actually want and filter out all the other ones
 	for _, job := range result.Jobs {
-		api.slurmSacctCacheAdd(&job)
-
 		// Slurm may sometimes return more jobs than initially requested (e.g. for array jobs).
 		// Ingore the jobs that were not requested.
-		if _, ok := jobIdsToQuery[*job.JobId]; !ok {
+		if _, ok := jobQueries[*job.JobId]; !ok {
 			continue
 		}
 
-		jobIdsToQuery[*job.JobId] = &job
+		jobQueries[*job.JobId] = &Job{sa: &job}
 	}
 
-	for jobId, job := range jobIdsToQuery {
+	// Sanity check that we actually go what we requested.
+	for jobId, job := range jobQueries {
 		if job == nil {
 			return nil, fmt.Errorf("Requested job (%s, %d) unavailable", clusterName, jobId)
 		}
@@ -570,7 +464,7 @@ func (api *slurmApi) QueryJobs(clusterName string, jobIds []uint32) ([]slurm_com
 	return retval, nil
 }
 
-func (api *slurmApi) QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]slurm_common.SacctJob, error) {
+func (api *slurmApi) QueryJobsTimeRange(clusterName string, begin, end time.Time) ([]slurm_common.Job, error) {
 	starttime := begin.Format("2006-01-02T15:04:05") // e.g. '2025-02-24T15:00:00'
 	endtime := end.Format("2006-01-02T15:04:05")     // e.g. '2025-02-24T15:00:00'
 	stdout, err := callProcess("sacct", "--cluster", clusterName, "--allusers", "--starttime", starttime, "--endtime", endtime, "--json")
@@ -584,16 +478,15 @@ func (api *slurmApi) QueryJobsTimeRange(clusterName string, begin, end time.Time
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	sacctJobsCommon := make([]slurm_common.SacctJob, len(result.Jobs))
+	retval := make([]slurm_common.Job, len(result.Jobs))
 	for i, job := range result.Jobs {
-		api.slurmSacctCacheAdd(&job)
-		sacctJobsCommon[i] = &job
+		retval[i] = &Job{sa: &job}
 	}
 
-	return sacctJobsCommon, nil
+	return retval, nil
 }
 
-func (api *slurmApi) QueryJobsActive(clusterName string) ([]slurm_common.ScontrolJob, error) {
+func (api *slurmApi) QueryJobsActive(clusterName string) ([]slurm_common.Job, error) {
 	// Caution: it is important to use --noheader here.
 	// For multi cluster systems squeue will otherwise print non-JSON header lines.
 	stdout, err := callProcess("squeue", "--noheader", "--cluster", clusterName, "--all", "--json")
@@ -607,138 +500,53 @@ func (api *slurmApi) QueryJobsActive(clusterName string) ([]slurm_common.Scontro
 		return nil, fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	scontrolJobsCommon := make([]slurm_common.ScontrolJob, len(result.Jobs))
+	scontrolJobsCommon := make([]slurm_common.Job, len(result.Jobs))
 	for i, job := range result.Jobs {
-		scontrolJobsCommon[i] = &job
+		scontrolJobsCommon[i] = &Job{sc: &job}
 	}
 
 	return scontrolJobsCommon, nil
 }
 
-func GetScontrolJob(job *SacctJob) (*ScontrolJob, error) {
-	// Performance info: This scontrol is usually fairly quickly, since this doesn't query the slurmdbd.
-	// In my tests it was around 100 executions per second.
-	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId), "--json")
+func (api *slurmApi) QueryJobsWithResources(clusterName string, jobs []slurm_common.Job) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	jobIdStrings := make([]string, 0)
+	jobMap := make(map[int64]slurm_common.Job)
+
+	for _, job := range jobs {
+		if job.GetCluster() != clusterName {
+			trace.Fatal("BUG: Cannot query job for mismatching cluster")
+		}
+
+		if !job.HasResourceInfo() {
+			jobIdStrings = append(jobIdStrings, fmt.Sprintf("%d", job.GetJobId()))
+			jobMap[job.GetJobId()] = job
+		}
+	}
+
+	jobIdString := strings.Join(jobIdStrings, ",")
+	stdout, err := callProcess("squeue", "--noheader", "--cluster", clusterName, "-j", jobIdString, "--json")
 	if err != nil {
-		return nil, fmt.Errorf("Unable to run scontrol show job %d: %w (%s)", *job.JobId, err, stdout)
+		return fmt.Errorf("Unable to run squeue -j %s: %w", jobIdString, err)
 	}
 
-	var scResult ScontrolResult
-	err = json.Unmarshal([]byte(stdout), &scResult)
+	var result ScontrolResult
+	err = json.Unmarshal([]byte(stdout), &result)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to parse scontrol JSON: %w", err)
+		return fmt.Errorf("%s: %w", SLURM_VERSION_INCOMPATIBLE, err)
 	}
 
-	if len(scResult.Jobs) == 0 {
-		return nil, nil
+	for _, jobResult := range result.Jobs {
+		if job, ok := jobMap[*jobResult.JobId]; ok {
+			jobReal := job.(*Job)
+			jobReal.sc = &jobResult
+		}
 	}
 
-	if len(scResult.Jobs) > 1 {
-		for _, scJob := range scResult.Jobs {
-			if *scJob.JobId == *job.JobId {
-				return &scJob, nil
-			}
-		}
-		return nil, fmt.Errorf("'scontrol show job %d' returned too many jobs (%d > 1). The one we were looking for was not part of it.", *job.JobId, len(scResult.Jobs))
-	}
-
-	return &scResult.Jobs[0], nil
-}
-
-func GetResources(saJob *SacctJob, scJob *ScontrolJob) ([]*schema.Resource, error) {
-	// This function fetches additional information about a Slurm job via scontrol.
-	// Unfortunately some of the information is not available via sacct, so we need
-	// scontrol to get this information. Because this information is not stored
-	// in the slurmdbd, we have to query this within a few minutes after a job has
-	// terminated at last.
-	// If this fetching fails, we cannot populate allocated resources. This is not
-	// critical to the operation of cc-backend, but it means certains graphs won't be
-	// available, since metrics won't be assignable to a job anymore.
-
-	// Create schema.Resources out of the ScontrolResult
-	if scJob == nil {
-		// If no jobs are returned, this is most likely because the job has already ended some time ago.
-		// There is nothing we can do about this, so try to obtain hostnames
-		// and continue without hwthread information.
-		nodes, err := GetNodes(saJob)
-		if err != nil {
-			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", *saJob.JobId, err)
-		}
-		trace.Debug("Job (%s, %d) has already ended. Hostnames are the only available resource.", *saJob.Cluster, *saJob.JobId)
-		resources := make([]*schema.Resource, len(nodes))
-		for i, v := range nodes {
-			resources[i] = &schema.Resource{Hostname: v}
-		}
-		return resources, nil
-	}
-
-	if scJob.JobResources == nil || scJob.JobResources.Nodes == nil {
-		// If Resources is nil, then the job probably just hasn't started yet.
-		// we can safely return an empty list, since this job will be discarded
-		// later either way.
-		trace.Debug("Job (%s, %d) has scontrol info available, but no resources", *saJob.Cluster, *saJob.JobId)
-		return make([]*schema.Resource, 0), nil
-	}
-
-	scAllocation := scJob.JobResources.Nodes.Allocation
-	resources := make([]*schema.Resource, 0)
-	for _, allocation := range scAllocation {
-		// Determine Hwthreads
-		hwthreads := make([]int, 0)
-		cpusPerSocket := len(allocation.Sockets[0].Cores)
-		for _, socket := range allocation.Sockets {
-			for _, core := range socket.Cores {
-				if string(*core.Status) != "ALLOCATED" {
-					continue
-				}
-				hwthreads = append(hwthreads, *socket.Index*cpusPerSocket+*core.Index)
-			}
-		}
-
-		// Determine accelerators. We prefer to get the information via Config + GresDetail.
-		// Though, for legacy we also support parsing the comment field.
-		// The latter one requires manual intervention by the Slurm Administrators.
-		var accelerators []string
-		if *allocation.Index < len(scJob.GresDetail) {
-			trace.Debug("Detecting GPU via gres")
-			nodeGres, err := ParseGRES(scJob.GresDetail[*allocation.Index])
-			if err == nil && nodeGres.Variant == "gpu" {
-				found := false
-				for hostRegex, pciAddrList := range config.Config.GpuPciAddrs {
-					// We initially check the regex, so no need to check for errors again.
-					match, _ := regexp.MatchString(hostRegex, *allocation.Hostname)
-					if match {
-						for _, v := range nodeGres.DomainIndices {
-							if v >= len(pciAddrList) {
-								trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *saJob.JobId, v, len(config.Config.GpuPciAddrs))
-								continue
-							}
-							trace.Debug("Found GPU %d for %s: %s", v, *allocation.Hostname, pciAddrList[v])
-							accelerators = append(accelerators, pciAddrList[v])
-						}
-						found = true
-						break
-					}
-				}
-				if !found {
-					trace.Warn("Unable to find GPU list for hostname=%s from GRES for job %d", *allocation.Hostname, *saJob.JobId)
-				}
-			}
-		} else if *scJob.Comment != "" {
-			trace.Debug("Detecting GPU via comment")
-			accelerators = strings.Split(*scJob.Comment, ",")
-		}
-
-		// Create final result
-		r := schema.Resource{
-			Hostname:     *allocation.Hostname,
-			HWThreads:    hwthreads,
-			Accelerators: accelerators,
-		}
-		resources = append(resources, &r)
-	}
-
-	return resources, nil
+	return nil
 }
 
 func GetNodes(job *SacctJob) ([]string, error) {
@@ -747,38 +555,13 @@ func GetNodes(job *SacctJob) ([]string, error) {
 		// hostnames listed. Return an empty list in this case.
 		return make([]string, 0), nil
 	}
-	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "hostnames", *job.Nodes)
+
+	nodeList, err := hostlist.Expand(*job.Nodes)
 	if err != nil {
-		return nil, fmt.Errorf("scontrol show hostnames '%s' failed: %w (%s)", *job.Nodes, err, stdout)
-	}
-	stdout = strings.TrimSpace(stdout)
-	return strings.Split(stdout, "\n"), nil
-}
-
-func GetJobInfoText(job *SacctJob) string {
-	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "show", "job", fmt.Sprintf("%d", *job.JobId))
-	if err != nil {
-		// If query fails, this is most likely because the job has already ended some time ago.
-		// There is nothing we can do about this, so continue with just a warning.
-		return fmt.Sprintf("Error while getting job information for JobID=%d", *job.JobId)
+		return nil, fmt.Errorf("Unable to resolve hostname list '%s': %w", *job.Nodes, err)
 	}
 
-	arrayJobGapIndex := strings.Index(stdout, "\n\n")
-	if arrayJobGapIndex != -1 {
-		stdout = stdout[0 : arrayJobGapIndex+1]
-	}
-
-	return strings.TrimSpace(stdout)
-}
-
-func GetJobScript(job *SacctJob) string {
-	stdout, err := callProcess("scontrol", "--cluster", *job.Cluster, "write", "batch_script", fmt.Sprintf("%d", *job.JobId), "-")
-	if err != nil {
-		// If the job has ended some time ago, this will fail.
-		// However, this is not a critical case, so just return an empty job script.
-		return ""
-	}
-	return stdout
+	return nodeList, nil
 }
 
 func CheckPerms() {
@@ -973,34 +756,417 @@ func callProcess(argv ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-func (job *SacctJob) GetJobId() int64 {
-	return int64(*job.JobId)
+func saScNilErr() {
+	trace.Fatal("Trying to read from Job with neither sacct or scontrol info (sa=nil & sc=nil)")
 }
 
-func (job *SacctJob) GetCluster() string {
-	return *job.Cluster
+func (j *Job) GetJobId() int64 {
+	if j.sa != nil {
+		return *j.sa.JobId
+	}
+	if j.sc != nil {
+		return *j.sc.JobId
+	}
+	saScNilErr()
+	return -1
 }
 
-func (job *SacctJob) GetState() string {
-	return string(*job.State.Current)
+func (j *Job) GetCluster() string {
+	if j.sa != nil {
+		return *j.sa.Cluster
+	}
+	if j.sc != nil {
+		return *j.sc.Cluster
+	}
+	saScNilErr()
+	return ""
 }
 
-func (job *SacctJob) IsFinished() bool {
-	return job.Time.End.Number > 0
+func (j *Job) GetPartition() string {
+	if j.sa != nil {
+		return *j.sa.Partition
+	}
+	if j.sc != nil {
+		return *j.sc.Partition
+	}
+	saScNilErr()
+	return ""
 }
 
-func (job *ScontrolJob) GetJobId() int64 {
-	return int64(*job.JobId)
+func (j *Job) GetName() string {
+	if j.sa != nil {
+		return *j.sa.Name
+	}
+	if j.sc != nil {
+		return *j.sc.Name
+	}
+	saScNilErr()
+	return ""
 }
 
-func (job *ScontrolJob) GetCluster() string {
-	return *job.Cluster
+func (j *Job) GetUser() string {
+	if j.sa != nil {
+		return *j.sa.User
+	}
+	if j.sc != nil {
+		return *j.sc.UserName
+	}
+	saScNilErr()
+	return ""
 }
 
-func (job *ScontrolJob) GetState() string {
-	return string(*job.JobState)
+func (j *Job) GetGroup() string {
+	if j.sa != nil {
+		return *j.sa.Group
+	}
+	if j.sc != nil {
+		return *j.sc.GroupName
+	}
+	saScNilErr()
+	return ""
 }
 
-func (job *ScontrolJob) IsRunning() bool {
-	return *job.JobState == "RUNNING"
+func (j *Job) GetAccount() string {
+	if j.sa != nil {
+		return *j.sa.Account
+	}
+	if j.sc != nil {
+		return *j.sc.Account
+	}
+	saScNilErr()
+	return ""
+}
+
+func (j *Job) GetState() string {
+	if j.sa != nil {
+		return string(*j.sa.State.Current)
+	}
+	if j.sc != nil {
+		return string(*j.sc.JobState)
+	}
+	saScNilErr()
+	return ""
+}
+
+func (j *Job) IsFinished() bool {
+	if j.sa != nil {
+		return j.sa.Time.End.Number > 0
+	}
+	if j.sc != nil {
+		return j.sc.EndTime.Number > 0
+	}
+	saScNilErr()
+	return false
+}
+
+func (j *Job) GetSubmitTime() time.Time {
+	if j.sa != nil {
+		return time.Unix(j.sa.Time.Submission.Number, 0)
+	}
+	if j.sc != nil {
+		return time.Unix(j.sc.SubmitTime.Number, 0)
+	}
+	saScNilErr()
+	return time.Unix(0, 0)
+}
+
+func (j *Job) GetStartTime() time.Time {
+	if j.sa != nil {
+		return time.Unix(j.sa.Time.Start.Number, 0)
+	}
+	if j.sc != nil {
+		return time.Unix(j.sc.StartTime.Number, 0)
+	}
+	saScNilErr()
+	return time.Unix(0, 0)
+}
+
+func (j *Job) GetEndTime() time.Time {
+	if j.sa != nil {
+		return time.Unix(j.sa.Time.End.Number, 0)
+	}
+	if j.sc != nil {
+		return time.Unix(j.sc.EndTime.Number, 0)
+	}
+	saScNilErr()
+	return time.Unix(0, 0)
+}
+
+func (j *Job) GetTimeLimit() time.Duration {
+	if j.sa != nil {
+		return time.Duration(j.sa.Time.Limit.Number) * time.Minute // slurm reports the limit in MINUTES, not seconds
+	}
+	if j.sc != nil {
+		return time.Duration(j.sc.TimeLimit.Number) * time.Minute
+	}
+	saScNilErr()
+	return time.Duration(0)
+}
+
+func (j *Job) GetResources() ([]*schema.Resource, error) {
+	// TODO rewrite this function for the new interface
+	// This function fetches additional information about a Slurm job via scontrol.
+	// Unfortunately some of the information is not available via sacct, so we need
+	// scontrol to get this information. Because this information is not stored
+	// in the slurmdbd, we have to query this within a few minutes after a job has
+	// terminated at last.
+	// If this fetching fails, we cannot populate allocated resources. This is not
+	// critical to the operation of cc-backend, but it means certains graphs won't be
+	// available, since metrics won't be assignable to a job anymore.
+
+	// Create schema.Resources out of the ScontrolResult
+	if j.sc == nil {
+		// If no jobs are returned, this is most likely because the job has already ended some time ago.
+		// There is nothing we can do about this, so try to obtain hostnames
+		// and continue without hwthread information.
+		// You can reduce the chances of this by increasing MinJobAge in slurm.conf
+		nodes, err := GetNodes(j.sa)
+		if err != nil {
+			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", *j.sa.JobId, err)
+		}
+		trace.Debug("Job (%s, %d) has already ended. Hostnames are the only available resource.", *j.sa.Cluster, *j.sa.JobId)
+		resources := make([]*schema.Resource, len(nodes))
+		for i, v := range nodes {
+			resources[i] = &schema.Resource{Hostname: v}
+		}
+		return resources, nil
+	}
+
+	if j.sc.JobResources == nil || j.sc.JobResources.Nodes == nil {
+		// If Resources is nil, then the job probably just hasn't started yet.
+		// we can safely return an empty list, since this job will be discarded
+		// later either way.
+		trace.Debug("Job (%s, %d) has scontrol info available, but no resources", *j.sa.Cluster, *j.sa.JobId)
+		return make([]*schema.Resource, 0), nil
+	}
+
+	scAllocation := j.sc.JobResources.Nodes.Allocation
+	resources := make([]*schema.Resource, 0)
+	for _, allocation := range scAllocation {
+		// Determine Hwthreads
+		hwthreads := make([]int, 0)
+		cpusPerSocket := len(allocation.Sockets[0].Cores)
+		for _, socket := range allocation.Sockets {
+			for _, core := range socket.Cores {
+				if string(*core.Status) != "ALLOCATED" {
+					continue
+				}
+				hwthreads = append(hwthreads, *socket.Index*cpusPerSocket+*core.Index)
+			}
+		}
+
+		// Determine accelerators. We prefer to get the information via Config + GresDetail.
+		// Though, for legacy we also support parsing the comment field.
+		// The latter one requires manual intervention by the Slurm Administrators.
+		var accelerators []string
+		if *allocation.Index < len(j.sc.GresDetail) {
+			trace.Debug("Detecting GPU via gres")
+			nodeGres, err := ParseGRES(j.sc.GresDetail[*allocation.Index])
+			if err == nil && nodeGres.Variant == "gpu" {
+				found := false
+				for hostRegex, pciAddrList := range config.Config.GpuPciAddrs {
+					// We initially check the regex, so no need to check for errors again.
+					match, _ := regexp.MatchString(hostRegex, *allocation.Hostname)
+					if match {
+						for _, v := range nodeGres.DomainIndices {
+							if v >= len(pciAddrList) {
+								trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *j.sa.JobId, v, len(config.Config.GpuPciAddrs))
+								continue
+							}
+							trace.Debug("Found GPU %d for %s: %s", v, *allocation.Hostname, pciAddrList[v])
+							accelerators = append(accelerators, pciAddrList[v])
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					trace.Warn("Unable to find GPU list for hostname=%s from GRES for job %d", *allocation.Hostname, *j.sa.JobId)
+				}
+			}
+		} else if *j.sc.Comment != "" {
+			trace.Debug("Detecting GPU via comment")
+			accelerators = strings.Split(*j.sc.Comment, ",")
+		}
+
+		// Create final result
+		r := schema.Resource{
+			Hostname:     *allocation.Hostname,
+			HWThreads:    hwthreads,
+			Accelerators: accelerators,
+		}
+		resources = append(resources, &r)
+	}
+
+	return resources, nil
+}
+
+func (j *Job) GetJobScript() string {
+	if j.jobScript == nil {
+		stdout, err := callProcess("scontrol", "--cluster", j.GetCluster(), "write", "batch_script", fmt.Sprintf("%d", j.GetJobId()), "-")
+		if err != nil {
+			// If the job has ended some time ago, this will fail.
+			// However, this is not a critical case, so just return an empty job script.
+			stdout = ""
+		}
+		j.jobScript = &stdout
+	}
+
+	return *j.jobScript
+}
+
+func (j *Job) GetSlurmInfo() string {
+	if j.slurmInfo == nil {
+		stdout, err := callProcess("scontrol", "--cluster", j.GetCluster(), "show", "job", fmt.Sprintf("%d", j.GetJobId()))
+		if err != nil {
+			// If query fails, this is most likely because the job has already ended some time ago.
+			// There is nothing we can do about this, so continue with just a warning.
+			return fmt.Sprintf("Error while getting job information for (%s, %d)", j.GetCluster(), j.GetJobId())
+		}
+
+		arrayJobGapIndex := strings.Index(stdout, "\n\n")
+		if arrayJobGapIndex != -1 {
+			stdout = stdout[0 : arrayJobGapIndex+1]
+		}
+
+		tmp := strings.TrimSpace(stdout)
+		j.slurmInfo = &tmp
+	}
+
+	return *j.slurmInfo
+}
+
+func (j *Job) GetArrayJobId() int64 {
+	if j.sa != nil {
+		return *j.sa.Array.JobId
+	}
+	if j.sc != nil {
+		return j.sc.ArrayJobId.Number
+	}
+	saScNilErr()
+	return -1
+}
+
+func (j *Job) GetNumNodes() int32 {
+	if j.sa != nil {
+		return int32(j.sa.AllocationNodes.Number)
+	}
+	if j.sc != nil {
+		return int32(len(j.sc.JobResources.Nodes.Allocation))
+	}
+	saScNilErr()
+	return -1
+}
+
+func GetSacctTresCount(tresList []SacctJobTres, tresType, tresName string, count *int32) {
+	for _, tres := range tresList {
+		if *tres.Type == tresType {
+			if tresName != "" && *tres.Name != tresName {
+				continue
+			}
+			*count = int32(*tres.Count)
+			return
+		}
+	}
+	// If no valid tres is found, "count" remains unchanged
+}
+
+func GetScontrolTresCount(tresStr string, tresType, tresName string, count *int32) {
+	// tresStr looks like this: "cpu=1,mem=1M,node=1,billing=1"
+	tresCheck := ""
+	if tresName != "" {
+		tresCheck = fmt.Sprintf("%s/%s", tresType, tresName)
+	} else {
+		tresCheck = tresType
+	}
+
+	tresList := strings.Split(tresStr, ",")
+	for _, tres := range tresList {
+		// tres looks like this: "cpu=1"
+
+		tresSplit := strings.Split(tres, "=")
+		if len(tresSplit) != 2 {
+			trace.Error("tres element does not consist of two parts: '%s' (from '%s')", tresStr, tres)
+			continue
+		}
+
+		if tresSplit[0] == tresCheck {
+			v, err := strconv.ParseInt(tresSplit[1], 10, 64)
+			if err != nil {
+				trace.Error("Unable to parse tres count: %v", err)
+				continue
+			}
+
+			*count = int32(v)
+			return
+		}
+	}
+}
+
+func (j *Job) GetNumHWThreads() int32 {
+	if j.sa != nil {
+		result := int32(j.sa.Required.CPUs.Number)
+		GetSacctTresCount(j.sa.Tres.Requested, "cpu", "", &result)
+		GetSacctTresCount(j.sa.Tres.Allocated, "cpu", "", &result)
+		return result
+	}
+	if j.sc != nil {
+		result := int32(j.sc.CPUs.Number)
+		GetScontrolTresCount(*j.sc.TresReqStr, "cpu", "", &result)
+		GetScontrolTresCount(*j.sc.TresAllocStr, "cpu", "", &result)
+		return result
+	}
+	saScNilErr()
+	return -1
+}
+
+func (j *Job) GetNumAccelerators() int32 {
+	if j.sa != nil {
+		result := int32(0)
+		GetSacctTresCount(j.sa.Tres.Requested, "gres", "gpu", &result)
+		GetSacctTresCount(j.sa.Tres.Allocated, "gres", "gpu", &result)
+		return result
+	}
+	if j.sc != nil {
+		result := int32(0)
+		GetScontrolTresCount(*j.sc.TresReqStr, "gres", "gpu", &result)
+		GetScontrolTresCount(*j.sc.TresAllocStr, "gres", "gpu", &result)
+		return result
+	}
+	saScNilErr()
+	return -1
+}
+
+func (j *Job) GetNodeShared() string {
+	shared := "multi_user"
+	if j.sc != nil {
+		if j.sc.Exclusive != nil && string(*j.sc.Exclusive) == "true" {
+			shared = "none"
+		} else if j.sc.Shared != nil {
+			if string(*j.sc.Shared) == "user" {
+				shared = "single_user"
+			} else if string(*j.sc.Shared) == "none" {
+				shared = "none"
+			} else if string(*j.sc.Shared) == "" {
+				shared = "multi_user"
+			}
+		} else {
+			trace.Debug("No information available about exclusive/shared for job %d.", *j.sc.JobId)
+		}
+	}
+
+	// Do not require sacct information here, so don't throw an error if it's nil.
+	// Afaik this is not stored in the Slurm database, so we can't really do anthing
+	// but return a default value. Perhaps in the future it would make more sense to
+	// return something like "unknown".
+
+	return shared
+}
+
+func (j *Job) HasResourceInfo() bool {
+	return j.sc != nil
+}
+
+func (j *Job) HasDbInfo() bool {
+	return j.sa != nil
 }

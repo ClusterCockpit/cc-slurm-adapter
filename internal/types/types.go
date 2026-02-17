@@ -1,13 +1,13 @@
 package types
 
 import (
-	"github.com/ClusterCockpit/cc-lib/schema"
+	"github.com/ClusterCockpit/cc-lib/v2/schema"
 )
 
 type CCStartJobRequest schema.Job
 
 type CCStopJobRequest struct {
-	JobId    uint32          `json:"jobId"     db:"job_id"`
+	JobId    int64           `json:"jobId"     db:"job_id"`
 	Cluster  string          `json:"cluster"   db:"cluster"`
 	State    schema.JobState `json:"jobState"  db:"state"`
 	StopTime int64           `json:"stopTime"  db:"stop_time"`
