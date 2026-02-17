@@ -5,7 +5,7 @@ import (
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
 
-	"github.com/ClusterCockpit/cc-lib/schema"
+	"github.com/ClusterCockpit/cc-lib/v2/schema"
 )
 
 type Job interface {

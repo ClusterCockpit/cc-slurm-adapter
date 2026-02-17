@@ -5,12 +5,11 @@ go 1.24.0
 toolchain go1.24.4
 
 require (
-	github.com/ClusterCockpit/cc-lib v1.0.2
+	github.com/ClusterCockpit/cc-lib/v2 v2.4.0
 	github.com/nats-io/nats.go v1.48.0
 )
 
 require (
-	github.com/ClusterCockpit/cc-backend v1.4.4 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

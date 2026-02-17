@@ -20,8 +20,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/ClusterCockpit/cc-lib/ccMessage"
-	"github.com/ClusterCockpit/cc-lib/schema"
+	"github.com/ClusterCockpit/cc-lib/v2/ccMessage"
+	"github.com/ClusterCockpit/cc-lib/v2/schema"
 )
 
 type CacheJobState struct {

@@ -18,8 +18,8 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
 
-	"github.com/ClusterCockpit/cc-backend/pkg/archive"
-	"github.com/ClusterCockpit/cc-lib/schema"
+	"github.com/ClusterCockpit/cc-lib/v2/hostlist"
+	"github.com/ClusterCockpit/cc-lib/v2/schema"
 )
 
 // SlurmInt supports these two JSON layouts:
@@ -556,12 +556,12 @@ func GetNodes(job *SacctJob) ([]string, error) {
 		return make([]string, 0), nil
 	}
 
-	nodeList, err := archive.ParseNodeList(*job.Nodes)
+	nodeList, err := hostlist.Expand(*job.Nodes)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to resolve hostname list '%s': %w", *job.Nodes, err)
 	}
 
-	return nodeList.PrintList(), nil
+	return nodeList, nil
 }
 
 func CheckPerms() {
