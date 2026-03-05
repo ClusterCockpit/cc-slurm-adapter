@@ -133,8 +133,16 @@ func DaemonMain() error {
 				// cc-backend requires at least a version somewhere around 2025-09-10 to support stat syncing
 				trace.Error("Unable to sync stats to cc-backend. Is your cc-backend version recent enough? %v", err)
 			}
-			processSlurmSacctPoll()
-			processSlurmSqueuePoll()
+			err = processSlurmSacctPoll()
+			if err != nil {
+				trace.Error("processSlurmSqueuePoll: %s", err)
+				ccApi.CacheInvalidate()
+			}
+			err = processSlurmSqueuePoll()
+			if err != nil {
+				trace.Error("processSlurmSqueuePoll: %s", err)
+				ccApi.CacheInvalidate()
+			}
 			ccApi.CacheGC()
 		}
 
@@ -311,7 +319,7 @@ func jobEventsProcess() {
 	jobEvents = newJobEvents
 }
 
-func processSlurmSacctPoll() {
+func processSlurmSacctPoll() error {
 	trace.Debug("processSlurmSacctPoll()")
 	lastRun := lastRunGet().Add(time.Duration(-1 * time.Second)) // -1 second for good measure to avoid overlap error
 	thisRun := time.Now()
@@ -337,14 +345,12 @@ func processSlurmSacctPoll() {
 	for _, cluster := range slurmApi.GetClusterNames() {
 		jobs, err := slurmApi.QueryJobsTimeRange(cluster, lastRun, thisRun)
 		if err != nil {
-			trace.Error("Unable to query Slurm for jobs (is Slurm available?): %s", err)
-			return
+			return fmt.Errorf("Unable to query Slurm for jobs (is Slurm available?): %s", err)
 		}
 
 		err = ccApi.SyncJobs(cluster, jobs, false)
 		if err != nil {
-			trace.Error("Syncing job (%s, %v) to ClusterCockpit failed (%s). Trying later...", cluster, jobIdsOfJobs(jobs), err)
-			return
+			return fmt.Errorf("Syncing job (%s, %v) to ClusterCockpit failed (%s). Trying later...", cluster, jobIdsOfJobs(jobs), err)
 		}
 
 		if len(jobs) > 0 {
@@ -352,15 +358,16 @@ func processSlurmSacctPoll() {
 			lastRunSet(thisRun)
 		}
 	}
+
+	return nil
 }
 
-func processSlurmSqueuePoll() {
+func processSlurmSqueuePoll() error {
 	trace.Debug("processSlurmSqueuePoll()")
 	for _, cluster := range slurmApi.GetClusterNames() {
 		scJobs, err := slurmApi.QueryJobsActive(cluster)
 		if err != nil {
-			trace.Error("Unable to query Slurm via squeue (is Slurm available?): %v", err)
-			return
+			return fmt.Errorf("Unable to query Slurm via squeue (is Slurm available?): %v", err)
 		}
 
 		slurmIsJobRunning := make(map[int64]bool)
@@ -403,8 +410,7 @@ func processSlurmSqueuePoll() {
 		trace.Warn("Detected stale jobs in cc-backend (%s, %v). Trying to synchronize...", cluster, jobIdsToQuery)
 		jobs, err := slurmApi.QueryJobs(cluster, jobIdsToQuery)
 		if err != nil {
-			trace.Error("Failed to query cc-backend's stale job from Slurm: %v", err)
-			continue
+			return fmt.Errorf("Failed to query cc-backend's stale job from Slurm: %v", err)
 		}
 
 		for _, job := range jobs {
@@ -413,9 +419,11 @@ func processSlurmSqueuePoll() {
 
 		err = ccApi.SyncJobs(cluster, jobs, false)
 		if err != nil {
-			trace.Error("Failed to sync cc-backend's stale job from Slurm: %v", err)
+			return fmt.Errorf("Failed to sync cc-backend's stale job from Slurm: %v", err)
 		}
 	}
+
+	return nil
 }
 
 func jobIdsOfJobs(jobs []slurm_common.Job) []int64 {

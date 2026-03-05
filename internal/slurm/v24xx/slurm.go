@@ -924,7 +924,7 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 		if err != nil {
 			return nil, fmt.Errorf("scontrol returned no jobs for id %d and we were unable to obtain node names: %w", *j.sa.JobId, err)
 		}
-		trace.Debug("Job (%s, %d) has already ended. Hostnames are the only available resource.", *j.sa.Cluster, *j.sa.JobId)
+		trace.Debug("Job (%s, %d) is missing scontrol data. Either it was not requested or is not available. Hostnames are the only available resource.", *j.sa.Cluster, *j.sa.JobId)
 		resources := make([]*schema.Resource, len(nodes))
 		for i, v := range nodes {
 			resources[i] = &schema.Resource{Hostname: v}

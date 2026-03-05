@@ -270,6 +270,11 @@ func (api *CCApi) CacheUpdate() error {
 	return nil
 }
 
+func (api *CCApi) CacheInvalidate() {
+	trace.Debug("Invalidating CC Job Cache")
+	api.JobCacheValid = false
+}
+
 func (api *CCApi) CacheGC() {
 	for _, cachedJobStates := range api.JobCache {
 		for jobId, cachedJobState := range cachedJobStates {
