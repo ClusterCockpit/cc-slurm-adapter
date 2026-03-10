@@ -600,9 +600,10 @@ func (api *CCApi) ccPost(relApiUrl string, bodyJson []byte) (*http.Response, err
 	profiler.SectionBegin("HTTP POST")
 	defer profiler.SectionEnd("HTTP POST")
 
-	trace.Debug("POST to function %s: %s", relApiUrl, string(bodyJson))
-
 	url := fmt.Sprintf("%s/api%s", config.Config.CcRestUrl, relApiUrl)
+
+	trace.Debug("POST to %s: %s", url, string(bodyJson))
+
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJson))
 	if err != nil {
 		return nil, err
@@ -620,7 +621,9 @@ func (api *CCApi) ccGet(relApiUrl string) (*http.Response, error) {
 	defer profiler.SectionEnd("HTTP GET")
 
 	url := fmt.Sprintf("%s/api%s", config.Config.CcRestUrl, relApiUrl)
-	trace.Debug("GET to function %s", relApiUrl)
+
+	trace.Debug("GET from %s", url)
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
