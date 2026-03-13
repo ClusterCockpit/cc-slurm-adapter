@@ -86,6 +86,7 @@ func NewCCApi(slurmApi slurm_common.SlurmApi) (*CCApi, error) {
 	if len(config.Config.NatsServer) > 0 {
 		natsAddr := fmt.Sprintf("nats://%s:%d", config.Config.NatsServer, config.Config.NatsPort)
 		trace.Info("Connecting to NATS: %s", natsAddr)
+		options = append(options, nats.RetryOnFailedConnect(true), nats.MaxReconnects(-1))
 		ccApi.natsConn, err = nats.Connect(natsAddr, options...)
 		if err != nil {
 			return nil, fmt.Errorf("Unable to connect to NATS (server: %s): %w", natsAddr, err)
