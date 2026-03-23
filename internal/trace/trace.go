@@ -26,7 +26,7 @@ func format(logLevelPrefix string, fmtStr string, v ...any) string {
 
 func Init(level int) {
 	debugLevel = level
-	log.SetFlags(0) // Disable time/date output in log. That's your journals job.
+	log.SetFlags(log.Lshortfile) // Disable time/date output in log. That's your journals job.
 }
 
 func Fatal(fmtStr string, v ...any) {
