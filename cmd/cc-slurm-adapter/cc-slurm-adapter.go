@@ -24,7 +24,7 @@ func main() {
 
 	flag.Parse()
 
-	trace.SetLevel(debugLevel)
+	trace.Init(debugLevel)
 	config.Load(configPath)
 
 	var err error

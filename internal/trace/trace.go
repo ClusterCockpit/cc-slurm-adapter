@@ -24,8 +24,9 @@ func format(logLevelPrefix string, fmtStr string, v ...any) string {
 	return fmt.Sprintf("%s [%s:%d] %s", logLevelPrefix, fn, line, fmt.Sprintf(fmtStr, v...))
 }
 
-func SetLevel(level int) {
+func Init(level int) {
 	debugLevel = level
+	log.SetFlags(0) // Disable time/date output in log. That's your journals job.
 }
 
 func Fatal(fmtStr string, v ...any) {
