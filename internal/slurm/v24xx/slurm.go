@@ -979,6 +979,7 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 					success = false
 					break
 				}
+				trace.Debug("Found GPU %s", acc)
 			}
 
 			if success {
