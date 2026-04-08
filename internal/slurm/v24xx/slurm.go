@@ -955,11 +955,39 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 			}
 		}
 
-		// Determine accelerators. We prefer to get the information via Config + GresDetail.
-		// Though, for legacy we also support parsing the comment field.
-		// The latter one requires manual intervention by the Slurm Administrators.
+		// There are two ways we can detect GPUs of a job.
+		// The first NHR@FAU specific solution is to get it via the Job comment field.
+		// While this solution is not portable, we prefer it, since if it is present,
+		// the content is more reliable than the second option.
+		// The second solution is to detect it via Slurm GRES. However, in rare cases the
+		// GPU ID -> PCI ID mapping reported by Slurm are not identical to what
+		// nvidia-smi reports. But it is the more portable solution, so use it as a safe
+		// fallback.
+
+		// PCI IDs via Slurm comment
 		var accelerators []string
-		if *allocation.Index < len(j.sc.GresDetail) {
+		if *j.sc.Comment != "" {
+			trace.Debug("Detecting GPU via comment")
+			// Check if the comment actually looks like PCI IDs. If an admin has configured the Slurm comment
+			// to contain something else, we don't want to submit garbage.
+			acceleratorCandidates := strings.Split(*j.sc.Comment, ",")
+			r := regexp.MustCompile("^[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+\\.[0-9a-fA-F]$")
+			success := true
+			for _, acc := range acceleratorCandidates {
+				if !r.MatchString(acc) {
+					trace.Debug("Comment fragment '%s' doesn't look like a PCI ID", acc)
+					success = false
+					break
+				}
+			}
+
+			if success {
+				accelerators = acceleratorCandidates
+			}
+		}
+
+		// PCI IDs via Slurm GRES + config file
+		if len(accelerators) == 0 && *allocation.Index < len(j.sc.GresDetail) {
 			trace.Debug("Detecting GPU via gres")
 			nodeGres, err := ParseGRES(j.sc.GresDetail[*allocation.Index])
 			if err == nil && nodeGres.Variant == "gpu" {
@@ -984,9 +1012,6 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 					trace.Warn("Unable to find GPU list for hostname=%s from GRES for job %d", *allocation.Hostname, *j.sa.JobId)
 				}
 			}
-		} else if *j.sc.Comment != "" {
-			trace.Debug("Detecting GPU via comment")
-			accelerators = strings.Split(*j.sc.Comment, ",")
 		}
 
 		// Create final result
