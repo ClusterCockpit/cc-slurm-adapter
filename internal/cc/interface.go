@@ -464,6 +464,7 @@ func (api *CCApi) CCStopJob(job slurm_common.Job) error {
 	stopJobData := types.CCStopJobRequest{
 		JobId:    job.GetJobId(),
 		Cluster:  job.GetCluster(),
+		Partition: job.GetPartition(),
 		State:    schema.JobState(strings.ToLower(job.GetState())),
 		StopTime: job.GetEndTime().Unix(),
 	}
