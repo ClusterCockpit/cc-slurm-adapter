@@ -464,7 +464,6 @@ func (api *CCApi) CCStopJob(job slurm_common.Job) error {
 	stopJobData := types.CCStopJobRequest{
 		JobId:     job.GetJobId(),
 		Cluster:   job.GetCluster(),
-		Partition: job.GetPartition(),
 		State:     schema.JobState(strings.ToLower(job.GetState())),
 		StopTime:  job.GetEndTime().Unix(),
 	}
@@ -518,7 +517,12 @@ func (api *CCApi) CCStopJob(job slurm_common.Job) error {
 			"type-id":  "0",
 			"function": "stop_job",
 		}
-		msg, err := ccmessage.NewEvent("job", tags, nil, string(stopJobDataJSON), time.Unix(stopJobData.StopTime, 0))
+		// The use of the metaData below is purely as a workaround, because cc-backend currently does not
+		// support setting the partition in the stop_job API request. So pass it as metadata instead.
+		metaData := map[string]string{
+			"partition": job.GetPartition(),
+		}
+		msg, err := ccmessage.NewEvent("job", tags, metaData, string(stopJobDataJSON), time.Unix(stopJobData.StopTime, 0))
 		if err != nil {
 			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
