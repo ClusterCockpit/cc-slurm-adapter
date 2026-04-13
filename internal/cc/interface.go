@@ -462,11 +462,11 @@ func (api *CCApi) CCStopJob(job slurm_common.Job) error {
 	}
 
 	stopJobData := types.CCStopJobRequest{
-		JobId:    job.GetJobId(),
-		Cluster:  job.GetCluster(),
+		JobId:     job.GetJobId(),
+		Cluster:   job.GetCluster(),
 		Partition: job.GetPartition(),
-		State:    schema.JobState(strings.ToLower(job.GetState())),
-		StopTime: job.GetEndTime().Unix(),
+		State:     schema.JobState(strings.ToLower(job.GetState())),
+		StopTime:  job.GetEndTime().Unix(),
 	}
 
 	// WORKAROUNDS due to cc-backend's lack of support for them.
