@@ -458,9 +458,6 @@ func (api *slurmApi) QueryJobs(clusterName string, jobIds []int64) ([]slurm_comm
 		if job.sa == nil && job.sc == nil {
 			return nil, fmt.Errorf("Requested job (%s, %d) does not contain sa or sc data", clusterName, jobId)
 		}
-		if job == nil {
-			return nil, fmt.Errorf("Requested job (%s, %d) unavailable", clusterName, jobId)
-		}
 		retval = append(retval, job)
 	}
 
