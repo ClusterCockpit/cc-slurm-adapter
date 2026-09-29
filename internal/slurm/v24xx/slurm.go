@@ -527,6 +527,9 @@ func (api *slurmApi) QueryJobsWithResources(clusterName string, jobs []slurm_com
 		}
 	}
 
+	if len(jobIdStrings) == 0 {
+		return nil
+	}
 	jobIdString := strings.Join(jobIdStrings, ",")
 	stdout, err := callProcess("squeue", "--noheader", "--cluster", clusterName, "-j", jobIdString, "--json")
 	if err != nil {
