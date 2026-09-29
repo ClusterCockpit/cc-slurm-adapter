@@ -533,7 +533,12 @@ func (api *slurmApi) QueryJobsWithResources(clusterName string, jobs []slurm_com
 	jobIdString := strings.Join(jobIdStrings, ",")
 	stdout, err := callProcess("squeue", "--noheader", "--cluster", clusterName, "-j", jobIdString, "--json")
 	if err != nil {
-		return fmt.Errorf("Unable to run squeue -j %s: %w", jobIdString, err)
+		// A requested job may have disappeared since the accounting query.
+		// Preserve accounting data and collect allocations still available.
+		stdout, err = callProcess("squeue", "--noheader", "--cluster", clusterName, "--all", "--json")
+		if err != nil {
+			return fmt.Errorf("Unable to query squeue resources: %w", err)
+		}
 	}
 
 	var result ScontrolResult
