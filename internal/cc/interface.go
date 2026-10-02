@@ -100,6 +100,11 @@ func NewCCApi(slurmApi slurm_common.SlurmApi) (*CCApi, error) {
 	return ccApi, nil
 }
 
+// NatsConn returns the NATS connection or nil if NATS is disabled.
+func (api *CCApi) NatsConn() *nats.Conn {
+	return api.natsConn
+}
+
 func (api *CCApi) Close() {
 	trace.Debug("Closing HTTP connections")
 	api.httpClient.CloseIdleConnections()
