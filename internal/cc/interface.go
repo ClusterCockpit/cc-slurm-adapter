@@ -18,9 +18,8 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/types"
 
-	"github.com/nats-io/nats.go"
-
 	"github.com/ClusterCockpit/cc-lib/v2/ccMessage"
+	ccnats "github.com/ClusterCockpit/cc-lib/v2/nats"
 	"github.com/ClusterCockpit/cc-lib/v2/schema"
 )
 
@@ -34,7 +33,7 @@ const CACHE_EVICT_COUNT int = 5
 
 type CCApi struct {
 	hostname   string
-	natsConn   *nats.Conn
+	natsClient *ccnats.Client
 	httpClient http.Client
 
 	// map['clusterName'] -> map[slurmId] -> CC Job State, which are currently running (or ran recently).
@@ -68,50 +67,41 @@ func NewCCApi(slurmApi slurm_common.SlurmApi) (*CCApi, error) {
 		return nil, fmt.Errorf("Unable to obtain hostname: %w", err)
 	}
 
-	// Init NATS client
-	options := make([]nats.Option, 0)
-	if len(config.Config.NatsUser) > 0 {
-		options = append(options, nats.UserInfo(config.Config.NatsUser, config.Config.NatsPassword))
-	}
-	if len(config.Config.NatsCredsFile) > 0 {
-		options = append(options, nats.UserCredentials(config.Config.NatsCredsFile))
-	}
-	if len(config.Config.NatsNKeySeedFile) > 0 {
-		r, err := nats.NkeyOptionFromSeed(config.Config.NatsNKeySeedFile)
-		if err != nil {
-			return nil, fmt.Errorf("Unable to open NKeySeedFile: %w", err)
-		}
-		options = append(options, r)
-	}
+	// Init NATS client. It connects in the background if the server is not reachable yet.
 	if len(config.Config.NatsServer) > 0 {
 		natsAddr := fmt.Sprintf("nats://%s:%d", config.Config.NatsServer, config.Config.NatsPort)
 		trace.Info("Connecting to NATS: %s", natsAddr)
-		options = append(options, nats.RetryOnFailedConnect(true), nats.MaxReconnects(-1))
-		ccApi.natsConn, err = nats.Connect(natsAddr, options...)
+		ccApi.natsClient, err = ccnats.NewClient(&ccnats.NatsConfig{
+			Address:       natsAddr,
+			Username:      config.Config.NatsUser,
+			Password:      config.Config.NatsPassword,
+			CredsFilePath: config.Config.NatsCredsFile,
+			NkeySeedFile:  config.Config.NatsNKeySeedFile,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("Unable to connect to NATS (server: %s): %w", natsAddr, err)
 		}
 	}
 
-	if ccApi.natsConn == nil && !config.Config.CcRestSubmitJobs {
+	if ccApi.natsClient == nil && !config.Config.CcRestSubmitJobs {
 		return nil, fmt.Errorf("Either NATS or REST job submission must be enabled.")
 	}
 
 	return ccApi, nil
 }
 
-// NatsConn returns the NATS connection or nil if NATS is disabled.
-func (api *CCApi) NatsConn() *nats.Conn {
-	return api.natsConn
+// NatsClient returns the NATS client or nil if NATS is disabled.
+func (api *CCApi) NatsClient() *ccnats.Client {
+	return api.natsClient
 }
 
 func (api *CCApi) Close() {
 	trace.Debug("Closing HTTP connections")
 	api.httpClient.CloseIdleConnections()
 	trace.Debug("Closing NATS")
-	if api.natsConn != nil {
-		api.natsConn.Close()
-		api.natsConn = nil
+	if api.natsClient != nil {
+		api.natsClient.Close()
+		api.natsClient = nil
 	}
 }
 
@@ -427,7 +417,7 @@ func (api *CCApi) CCStartJob(job slurm_common.Job) error {
 	// Status Code 201 -> the job was newly created
 	// Status Code 422 -> the job already existed
 	// If job submission via REST is disabled, unconditionally send NATS message
-	if (!config.Config.CcRestSubmitJobs || respStart.StatusCode == 201) && api.natsConn != nil {
+	if (!config.Config.CcRestSubmitJobs || respStart.StatusCode == 201) && api.natsClient != nil {
 		trace.Info("Sent start_job successfully (%s, %d)", cluster, jobId)
 		tags := map[string]string{
 			"hostname": api.hostname,
@@ -439,7 +429,7 @@ func (api *CCApi) CCStartJob(job slurm_common.Job) error {
 		if err != nil {
 			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
-			err = api.natsConn.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			err = api.natsClient.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
 			if err != nil {
 				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}
@@ -514,7 +504,7 @@ func (api *CCApi) CCStopJob(job slurm_common.Job) error {
 		}
 	}
 
-	if (!config.Config.CcRestSubmitJobs || respStop.StatusCode == 200) && api.natsConn != nil {
+	if (!config.Config.CcRestSubmitJobs || respStop.StatusCode == 200) && api.natsClient != nil {
 		trace.Info("Sent stop_job successfully (%s, %d)", cluster, jobId)
 
 		// The use of the 'partition' as tag below is purely as a workaround, because cc-backend currently does not
@@ -530,7 +520,7 @@ func (api *CCApi) CCStopJob(job slurm_common.Job) error {
 		if err != nil {
 			trace.Warn("ccmessage.NewEvent() failed for job (%s, %d) failed: %s", cluster, jobId, err)
 		} else {
-			err = api.natsConn.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
+			err = api.natsClient.Publish(config.Config.NatsSubject, []byte(msg.ToLineProtocol(nil)))
 			if err != nil {
 				trace.Warn("Unable to publish message on NATS for job (%s, %d): %s", cluster, jobId, err)
 			}

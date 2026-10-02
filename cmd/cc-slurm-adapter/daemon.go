@@ -16,13 +16,17 @@ import (
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/cc"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/config"
-	"github.com/ClusterCockpit/cc-slurm-adapter/internal/fleet"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/prep"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/profiler"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
+
+	"github.com/ClusterCockpit/cc-lib/v2/fleet"
+	ccnats "github.com/ClusterCockpit/cc-lib/v2/nats"
 )
+
+const FLEET_BOOTSTRAP_TIMEOUT = 10 * time.Second
 
 var (
 	jobEvents             []prep.SlurmctldEnv
@@ -30,7 +34,7 @@ var (
 	slurmApi              slurm_common.SlurmApi
 	ccApi                 *cc.CCApi
 	fleetClient           *fleet.Client
-	fleetConfigChan       chan []byte
+	fleetConfigChan       <-chan fleet.Update // nil if fleet support is disabled
 )
 
 func DaemonMain() error {
@@ -147,10 +151,10 @@ func DaemonMain() error {
 				ccApi.CacheInvalidate()
 			}
 			ccApi.CacheGC()
-		case blob := <-fleetConfigChan:
+		case update := <-fleetConfigChan:
 			profiler.Begin()
 
-			applyFleetConfig(blob, false)
+			applyFleetConfig(update.Config, false)
 
 			// Intervals are captured above, so re-arm the timers if they were changed.
 			queryDelay = time.Duration(config.Config.SlurmQueryDelay) * time.Second
@@ -228,8 +232,8 @@ func daemonInit(ctx context.Context, prepEventChan chan []byte) error {
 	}
 
 	if fleetClient != nil {
-		// TODO Subscribe to the fleet discovery roster once cc-slurm-adapter needs to discover peers other than cc-backend.
-		go fleetClient.Run(ctx, ccApi.NatsConn, fleetConfigChan)
+		// TODO Consume fleetClient.Rosters() once cc-slurm-adapter needs to discover peers other than cc-backend.
+		go fleetClient.Run(ctx)
 	}
 
 	// job events queue initialization
@@ -254,7 +258,7 @@ func daemonQuit() {
 	// actually is the daemon...
 	if fleetClient != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		err := fleetClient.Deregister(ctx)
+		err := fleetClient.Close(ctx)
 		cancel()
 		if err != nil {
 			trace.Warn("fleet: Unable to deregister (cc-backend will mark the service as stale): %v", err)
@@ -275,11 +279,6 @@ func fleetInit(ctx context.Context) error {
 		return fmt.Errorf("fleetEnabled requires ccRestUrl to be set")
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		return fmt.Errorf("Unable to obtain hostname: %w", err)
-	}
-
 	// Register in cluster scope if we manage exactly one cluster (or the cluster was set explicitly).
 	// Otherwise there is no single cluster we belong to, so register in infra scope.
 	clusterNames := slurmApi.GetClusterNames()
@@ -291,23 +290,49 @@ func fleetInit(ctx context.Context) error {
 		trace.Warn("fleet: fleetCluster '%s' is not one of the Slurm clusters %v", cluster, clusterNames)
 	}
 
-	fleetClient = fleet.NewClient(fleet.Options{
-		BaseURL:  config.Config.CcRestUrl,
-		Token:    config.Config.CcRestJwt,
-		Hostname: hostname,
-		Cluster:  cluster,
+	var err error
+	fleetClient, err = fleet.New(fleet.Options{
+		Config: fleet.Config{
+			URL:                config.Config.CcRestUrl,
+			Token:              config.Config.CcRestJwt,
+			Cluster:            cluster,
+			HeartbeatInterval:  fmt.Sprintf("%ds", config.Config.FleetHeartbeatInterval),
+			ConfigPollInterval: fmt.Sprintf("%ds", config.Config.FleetConfigPollInterval),
+			HeartbeatSubject:   config.Config.FleetHeartbeatSubject,
+			CachePath:          config.Config.FleetConfigCachePath,
+		},
+		ServiceType: fleet.ServiceSlurmAdapter,
 		Meta: map[string]string{
 			"version":  versionString(),
 			"clusters": strings.Join(clusterNames, ","),
 		},
-		HeartbeatInterval:  time.Duration(config.Config.FleetHeartbeatInterval) * time.Second,
-		HeartbeatSubject:   config.Config.FleetHeartbeatSubject,
-		ConfigPollInterval: time.Duration(config.Config.FleetConfigPollInterval) * time.Second,
-		CachePath:          config.Config.FleetConfigCachePath,
+		// ccApi is only initialized after Bootstrap, since the fleet configuration may contain
+		// the NATS connection settings. Bootstrap does not use NATS and Run is started afterwards.
+		NATS: func() *ccnats.Client {
+			if ccApi == nil {
+				return nil
+			}
+			return ccApi.NatsClient()
+		},
 	})
-	fleetConfigChan = make(chan []byte, 1)
+	if err != nil {
+		return fmt.Errorf("Unable to initialize fleet client: %w", err)
+	}
+	fleetConfigChan = fleetClient.Configs()
 
-	applyFleetConfig(fleetClient.Bootstrap(ctx), true)
+	update, err := fleetClient.Bootstrap(ctx, FLEET_BOOTSTRAP_TIMEOUT)
+	if err != nil {
+		trace.Warn("fleet: Bootstrap failed, retrying in background: %v", err)
+		if update.Source == fleet.SourceCache {
+			trace.Warn("fleet: Using cached fleet configuration from '%s'", config.Config.FleetConfigCachePath)
+		}
+	} else if cluster != "" {
+		trace.Info("fleet: Registered as %s for cluster '%s'", fleet.ServiceSlurmAdapter, cluster)
+	} else {
+		trace.Info("fleet: Registered as %s (infra scope)", fleet.ServiceSlurmAdapter)
+	}
+
+	applyFleetConfig(update.Config, true)
 	return nil
 }
 

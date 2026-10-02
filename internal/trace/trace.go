@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+
+	cclog "github.com/ClusterCockpit/cc-lib/v2/ccLogger"
 )
 
 const (
@@ -27,6 +29,20 @@ func format(logLevelPrefix string, fmtStr string, v ...any) string {
 func Init(level int) {
 	debugLevel = level
 	log.SetFlags(0) // Disable time/date output in log. That's your journals job.
+
+	// cc-lib components (e.g. NATS and fleet client) log via ccLogger. Apply the same log level there.
+	switch {
+	case level <= FATAL:
+		cclog.Init("crit", false)
+	case level == ERROR:
+		cclog.Init("err", false)
+	case level == WARN:
+		cclog.Init("warn", false)
+	case level == INFO:
+		cclog.Init("info", false)
+	default:
+		cclog.Init("debug", false)
+	}
 }
 
 func Fatal(fmtStr string, v ...any) {
