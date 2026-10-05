@@ -679,7 +679,7 @@ func (api *slurmApi) QueryNodeStats(cluster string) ([]types.CCNodeStat, error) 
 
 func ParseGRES(gres string) (*GRES, error) {
 	// e.g. "gpu:h100:4(IDX:0-3)" --> "gpu" "h100" "4" "IDX" "0-3"
-	gresParseRegex := regexp.MustCompile("^(\\w+):(\\w+):(\\d+)\\((\\w+):([0-9,\\-]+)\\)$")
+	gresParseRegex := regexp.MustCompile("^(\\w+):(?:(\\w+):)?(\\d+)\\((\\w+):([0-9,\\-]+)\\)$")
 	gresParsed := gresParseRegex.FindStringSubmatch(gres)
 	if len(gresParsed) != 6 {
 		return nil, fmt.Errorf("Unable to parse GRES: '%s'", gres)
