@@ -1,24 +1,90 @@
 package slurm_v24xx
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 )
 
-func mockResourceSqueue(t *testing.T, body string) string {
+type resourceSqueueConfig struct {
+	CallsPath        string
+	Output           string
+	QueryExitCode    int
+	FallbackExitCode int
+}
+
+func TestMain(m *testing.M) {
+	// Reuse the test binary as squeue so all mock behavior stays in Go.
+	if filepath.Base(os.Args[0]) == "squeue" {
+		os.Exit(runResourceSqueue())
+	}
+	os.Exit(m.Run())
+}
+
+func runResourceSqueue() int {
+	data, err := os.ReadFile(os.Getenv("CC_SLURM_ADAPTER_TEST_SQUEUE_CONFIG"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	var config resourceSqueueConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	calls, err := os.OpenFile(config.CallsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	_, writeErr := fmt.Fprintln(calls, strings.Join(os.Args[1:], " "))
+	closeErr := calls.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	exitCode := config.FallbackExitCode
+	if slices.Contains(os.Args[1:], "-j") {
+		exitCode = config.QueryExitCode
+	}
+	if exitCode == 0 {
+		fmt.Print(config.Output)
+	}
+	return exitCode
+}
+
+func mockResourceSqueue(t *testing.T, output string, queryExitCode, fallbackExitCode int) string {
 	t.Helper()
 	dir := t.TempDir()
 	calls := filepath.Join(dir, "calls")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SQUEUE_CALLS\"\n" + body
-	if err := os.WriteFile(filepath.Join(dir, "squeue"), []byte(script), 0755); err != nil {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(executable, filepath.Join(dir, "squeue")); err != nil {
+		t.Fatal(err)
+	}
+	config := resourceSqueueConfig{
+		CallsPath: calls, Output: output,
+		QueryExitCode: queryExitCode, FallbackExitCode: fallbackExitCode,
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "squeue.json")
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	t.Setenv("SQUEUE_CALLS", calls)
+	t.Setenv("CC_SLURM_ADAPTER_TEST_SQUEUE_CONFIG", configPath)
 	return calls
 }
 
@@ -34,11 +100,7 @@ func assertResourceSqueueCalls(t *testing.T, path, want string) {
 }
 
 func TestResourceQueryFallsBackForExpiredJob(t *testing.T) {
-	calls := mockResourceSqueue(t, `case " $* " in
- *" -j "*) exit 1 ;;
-esac
-printf '%s' '{"jobs":[]}'
-`)
+	calls := mockResourceSqueue(t, `{"jobs":[]}`, 1, 0)
 	id, cluster := int64(101), "example"
 	accounting := &SacctJob{JobId: &id, Cluster: &cluster}
 	job := &Job{sa: accounting}
@@ -53,11 +115,7 @@ printf '%s' '{"jobs":[]}'
 }
 
 func TestResourceQueryFallbackPreservesMixedJobs(t *testing.T) {
-	calls := mockResourceSqueue(t, `case " $* " in
- *" -j "*) exit 1 ;;
-esac
-printf '%s' '{"jobs":[{"job_id":202,"cluster":"example"},{"job_id":999,"cluster":"example"}]}'
-`)
+	calls := mockResourceSqueue(t, `{"jobs":[{"job_id":202,"cluster":"example"},{"job_id":999,"cluster":"example"}]}`, 1, 0)
 	expiredID, runningID, cluster := int64(101), int64(202), "example"
 	expiredAccounting := &SacctJob{JobId: &expiredID, Cluster: &cluster}
 	runningAccounting := &SacctJob{JobId: &runningID, Cluster: &cluster}
@@ -80,7 +138,7 @@ printf '%s' '{"jobs":[{"job_id":202,"cluster":"example"},{"job_id":999,"cluster"
 }
 
 func TestResourceQueryFallbackFailureIsReturned(t *testing.T) {
-	calls := mockResourceSqueue(t, "exit 1\n")
+	calls := mockResourceSqueue(t, "", 1, 1)
 	id, cluster := int64(101), "example"
 	job := &Job{sa: &SacctJob{JobId: &id, Cluster: &cluster}}
 	api := slurmApi{}
@@ -92,7 +150,7 @@ func TestResourceQueryFallbackFailureIsReturned(t *testing.T) {
 }
 
 func TestResourceQuerySuccessfulLookupDoesNotFallBack(t *testing.T) {
-	calls := mockResourceSqueue(t, `printf '%s' '{"jobs":[{"job_id":202,"cluster":"example"}]}'`)
+	calls := mockResourceSqueue(t, `{"jobs":[{"job_id":202,"cluster":"example"}]}`, 0, 1)
 	id, cluster := int64(202), "example"
 	job := &Job{sa: &SacctJob{JobId: &id, Cluster: &cluster}}
 	api := slurmApi{}
