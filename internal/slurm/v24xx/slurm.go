@@ -282,8 +282,8 @@ type Job struct {
 
 const (
 	SLURM_VERSION_INCOMPATIBLE string = "Unable to parse sacct JSON. Is cc-slurm-adapter compatible with this Slurm version?"
-	SLURM_MAX_VER_MAJ          int    = 24
-	SLURM_MAX_VER_MIN          int    = 11
+	SLURM_MAX_VER_MAJ          int    = 26
+	SLURM_MIN_VER_MAJ          int    = 24
 )
 
 type slurmApi struct {
@@ -301,8 +301,8 @@ func NewSlurmApi() (slurm_common.SlurmApi, error) {
 
 	// 2. Is our version compatible?
 	major, _ := strconv.Atoi(string(sacctmgrResult.Meta.Slurm.Version.Major))
-	if major != 24 && major != 25 {
-		return nil, fmt.Errorf("Slurm backend v24xx only supports Slurm version v24.XX and v25.XX (found '%s')", sacctmgrResult.Meta.Slurm.Version)
+	if major < SLURM_MIN_VER_MAJ && major > SLURM_MAX_VER_MAJ {
+		return nil, fmt.Errorf("Slurm backend v24xx only supports Slurm version v%d.XX up to (including) v%d.XX (found '%s')", SLURM_MIN_VER_MAJ, SLURM_MAX_VER_MAJ, sacctmgrResult.Meta.Slurm.Version)
 	}
 
 	// 3. Determine cluster names managed by Slurm
