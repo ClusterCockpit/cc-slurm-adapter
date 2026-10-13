@@ -153,13 +153,61 @@ Config Key | Optional | Description
 `ccRestJwt`         | no  | The JWT obtained from cc-backend, which allows access to the REST API.
 `gpuPciAddrs`       | yes | Dictionary of Regexes mapping to a list of PCI addresses. If some of your nodes have GPUs, use this to map the hostnames via regex to a list of GPUs those nodes have. They have to be ordered like NVML shows them, which should hopefully be the same as `nvidia-smi` shows them, if all devices are visible.
 `ignoreHosts`       | yes | Regex of hostnames to ignore. If all hosts that are associated to a job match this regex, the job is discarded and not reported to cc-backend.
-`natsServer`        | yes | Hostname of the NATS server. Leave blank or omit to disable NATS.
+`natsServer`        | yes | Hostname of the NATS server. Leave blank or omit to disable NATS. If the server is not reachable, the daemon starts anyway and connects in the background.
 `natsPort`          | yes | Port of the NATS server.
 `natsSubject`       | yes | Subject to which publish job information to.
-`natsUser`          | yes | If your NATS server requires [user auth](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_intro/username_password), specify NATS user.
-`natsPassword`      | yes | Password to be used with the NATS user.
+`natsUser`          | yes | If your NATS server requires [user auth](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_intro/username_password), specify NATS user. User auth requires both `natsUser` and `natsPassword`. The environment variable `CC_NATS_USERNAME` (or a file named by `CC_NATS_USERNAME_FILE`) takes precedence.
+`natsPassword`      | yes | Password to be used with the NATS user. The environment variable `CC_NATS_PASSWORD` (or a file named by `CC_NATS_PASSWORD_FILE`) takes precedence.
 `natsCredsFile`     | yes | If your NATS server requires a [credentials file](https://docs.nats.io/using-nats/developer/connecting/creds), use this to set the file path.
 `natsNKeySeedFile`  | yes | If your NATS server requires plain [NKey auth](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_intro/nkey_auth), use this to specify the path to the file, which contains the NKey seed (private key).
+`fleetEnabled`      | yes | Register with cc-backend's fleet service and receive configuration from it (see below). Default `false`.
+`fleetCluster`      | yes | Register in cluster scope for this cluster. By default cluster scope is used if Slurm reports exactly one cluster, and infra scope otherwise.
+`fleetHeartbeatInterval` | yes | Interval (seconds) in which heartbeats are sent to the fleet service. Must be comfortably lower than cc-backend's `stale-after`. Default `30`.
+`fleetHeartbeatSubject` | yes | NATS subject for heartbeats (cc-backend's `main.fleet.heartbeat-subject`, e.g. `cc.fleet.event`). Requires `natsServer`. If empty, or while NATS is disconnected, heartbeats are sent via REST.
+`fleetConfigPollInterval` | yes | Interval (seconds) in which the fleet configuration is polled. Unchanged configurations only cost a header-only round trip. Default `60`.
+`fleetConfigCachePath` | yes | Path to the cache of the last fleet configuration received. It is used if cc-backend is unreachable when the daemon starts. Default `/var/lib/cc-slurm-adapter/fleet-config.json`.
+
+### Central configuration via cc-backend fleet service
+
+cc-backend's [fleet service](https://github.com/ClusterCockpit/cc-backend/blob/master/internal/fleet/README.md) allows to manage the configuration of cc-slurm-adapter centrally.
+When `fleetEnabled` is set, the daemon registers with service type `ccsa`, sends heartbeats and periodically pulls its configuration.
+The prolog/epilog mode does not use the fleet service.
+
+The fleet service authenticates with `ccRestUrl` and `ccRestJwt`, so the JWT needs the `api` role and the host running cc-slurm-adapter must be covered by cc-backend's `main.api-allowed-ips`.
+For fleet requests, the environment variable `CC_FLEET_TOKEN` (or a file named by `CC_FLEET_TOKEN_FILE`) takes precedence over `ccRestJwt`.
+The daemon uses the fleet client of [cc-lib](https://github.com/ClusterCockpit/cc-lib/tree/main/fleet); if registration fails, it is retried in the background with an exponential backoff of up to 5 minutes.
+
+The daemon registers in cluster scope if Slurm reports exactly one cluster (or `fleetCluster` is set), and in infra scope otherwise.
+Accordingly, its configuration is merged from these files of cc-backend's fleet configuration tree:
+
+```
+cluster scope:  defaults.json → ccsa/defaults.json → ccsa/<cluster>/defaults.json → ccsa/<cluster>/<hostname>.json
+infra scope:    defaults.json → ccsa/defaults.json → ccsa/<hostname>.json
+```
+
+The fleet configuration uses the same keys as the local config file, e.g. `ccsa/fritz/defaults.json`:
+
+```json
+{
+    "ignoreHosts": "^login\\d+$",
+    "gpuPciAddrs": {
+        "^tg0[0-9]{2}$": ["00000000:01:00.0", "00000000:41:00.0"]
+    }
+}
+```
+
+The effective configuration consists of the built-in defaults, overlayed by the local config file, overlayed by the fleet configuration.
+Objects (e.g. `gpuPciAddrs`) are merged key by key, all other values are replaced.
+Unknown keys are ignored, since the top level `defaults.json` applies to all ClusterCockpit services.
+
+- **Local only:** `pidFilePath`, `prepSockListenPath`, `prepSockConnectPath`, `lastRunPath`, `ccRestUrl`, `ccRestJwt` and all `fleet*` keys are always taken from the local config file. They are ignored with a warning in the fleet configuration.
+- **Startup only:** `natsServer`, `natsPort`, `natsUser`, `natsPassword`, `natsCredsFile` and `natsNKeySeedFile` are applied when the daemon starts. If they change later, a warning tells you to restart the daemon.
+- **Hot reload:** all other keys are applied while the daemon is running.
+
+If the fleet configuration is invalid (e.g. a broken regex), it is rejected and the previous configuration is kept.
+If no fleet configuration applies to the daemon (anymore), the local config file is used as is.
+The cache file at `fleetConfigCachePath` is only used if it was written for the same host, cluster and scope.
+On shutdown the daemon deregisters from the fleet service.
 
 ## Admin Guide
 

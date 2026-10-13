@@ -21,13 +21,20 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
+
+	"github.com/ClusterCockpit/cc-lib/v2/fleet"
+	ccnats "github.com/ClusterCockpit/cc-lib/v2/nats"
 )
+
+const FLEET_BOOTSTRAP_TIMEOUT = 10 * time.Second
 
 var (
 	jobEvents             []prep.SlurmctldEnv
 	jobEventSacctAttempts int
 	slurmApi              slurm_common.SlurmApi
 	ccApi                 *cc.CCApi
+	fleetClient           *fleet.Client
+	fleetConfigChan       <-chan fleet.Update // nil if fleet support is disabled
 )
 
 func DaemonMain() error {
@@ -144,6 +151,20 @@ func DaemonMain() error {
 				ccApi.CacheInvalidate()
 			}
 			ccApi.CacheGC()
+		case update := <-fleetConfigChan:
+			profiler.Begin()
+
+			applyFleetConfig(update.Config, false)
+
+			// Intervals are captured above, so re-arm the timers if they were changed.
+			queryDelay = time.Duration(config.Config.SlurmQueryDelay) * time.Second
+			newPollEventInterval := time.Duration(config.Config.SlurmPollInterval) * time.Second
+			if newPollEventInterval != pollEventInterval {
+				pollEventInterval = newPollEventInterval
+				if !pollEventFirst {
+					pollEventTicker.Reset(pollEventInterval)
+				}
+			}
 		}
 
 		if printLoop {
@@ -195,10 +216,24 @@ func daemonInit(ctx context.Context, prepEventChan chan []byte) error {
 		return fmt.Errorf("Unable to initialize Slurm API: %w", err)
 	}
 
+	// Init fleet service. This has to happen before initializing the ClusterCockpit interface,
+	// since the fleet configuration may contain the NATS connection settings.
+	if config.Config.FleetEnabled {
+		err = fleetInit(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Init ClusterCockpit interface
 	ccApi, err = cc.NewCCApi(slurmApi)
 	if err != nil {
 		return err
+	}
+
+	if fleetClient != nil {
+		// TODO Consume fleetClient.Rosters() once cc-slurm-adapter needs to discover peers other than cc-backend.
+		go fleetClient.Run(ctx)
 	}
 
 	// job events queue initialization
@@ -221,6 +256,15 @@ func daemonQuit() {
 	// The PID check is also not 100% reliable, since we just
 	// check against any process with that PID and not if it
 	// actually is the daemon...
+	if fleetClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := fleetClient.Close(ctx)
+		cancel()
+		if err != nil {
+			trace.Warn("fleet: Unable to deregister (cc-backend will mark the service as stale): %v", err)
+		}
+	}
+
 	trace.Debug("Closing Socket")
 	prep.ServerQuit()
 	sockType, sockAddr := config.GetProtoAddr(config.Config.PrepSockListenPath)
@@ -230,8 +274,87 @@ func daemonQuit() {
 	os.Remove(config.Config.PidFilePath)
 }
 
-func printWelcome() {
-	trace.Info("Initialization complete")
+func fleetInit(ctx context.Context) error {
+	if config.Config.CcRestUrl == "" {
+		return fmt.Errorf("fleetEnabled requires ccRestUrl to be set")
+	}
+
+	// Register in cluster scope if we manage exactly one cluster (or the cluster was set explicitly).
+	// Otherwise there is no single cluster we belong to, so register in infra scope.
+	clusterNames := slurmApi.GetClusterNames()
+	cluster := config.Config.FleetCluster
+	if cluster == "" && len(clusterNames) == 1 {
+		cluster = clusterNames[0]
+	}
+	if cluster != "" && !slices.Contains(clusterNames, cluster) {
+		trace.Warn("fleet: fleetCluster '%s' is not one of the Slurm clusters %v", cluster, clusterNames)
+	}
+
+	var err error
+	fleetClient, err = fleet.New(fleet.Options{
+		Config: fleet.Config{
+			URL:                config.Config.CcRestUrl,
+			Token:              config.Config.CcRestJwt,
+			Cluster:            cluster,
+			HeartbeatInterval:  fmt.Sprintf("%ds", config.Config.FleetHeartbeatInterval),
+			ConfigPollInterval: fmt.Sprintf("%ds", config.Config.FleetConfigPollInterval),
+			HeartbeatSubject:   config.Config.FleetHeartbeatSubject,
+			CachePath:          config.Config.FleetConfigCachePath,
+		},
+		ServiceType: fleet.ServiceSlurmAdapter,
+		Meta: map[string]string{
+			"version":  versionString(),
+			"clusters": strings.Join(clusterNames, ","),
+		},
+		// ccApi is only initialized after Bootstrap, since the fleet configuration may contain
+		// the NATS connection settings. Bootstrap does not use NATS and Run is started afterwards.
+		NATS: func() *ccnats.Client {
+			if ccApi == nil {
+				return nil
+			}
+			return ccApi.NatsClient()
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("Unable to initialize fleet client: %w", err)
+	}
+	fleetConfigChan = fleetClient.Configs()
+
+	update, err := fleetClient.Bootstrap(ctx, FLEET_BOOTSTRAP_TIMEOUT)
+	if err != nil {
+		trace.Warn("fleet: Bootstrap failed, retrying in background: %v", err)
+		if update.Source == fleet.SourceCache {
+			trace.Warn("fleet: Using cached fleet configuration from '%s'", config.Config.FleetConfigCachePath)
+		}
+	} else if cluster != "" {
+		trace.Info("fleet: Registered as %s for cluster '%s'", fleet.ServiceSlurmAdapter, cluster)
+	} else {
+		trace.Info("fleet: Registered as %s (infra scope)", fleet.ServiceSlurmAdapter)
+	}
+
+	applyFleetConfig(update.Config, true)
+	return nil
+}
+
+func applyFleetConfig(blob []byte, startup bool) {
+	changed, restartRequired, err := config.ApplyFleet(blob, startup)
+	if err != nil {
+		trace.Error("fleet: Rejecting fleet configuration, keeping previous configuration: %v", err)
+		return
+	}
+
+	if len(changed) > 0 {
+		trace.Info("fleet: Applied configuration. Changed keys: %v", changed)
+	} else {
+		trace.Debug("fleet: Applied configuration. No keys changed.")
+	}
+
+	if len(restartRequired) > 0 {
+		trace.Warn("fleet: Configuration keys %v changed, but only take effect after restarting the daemon", restartRequired)
+	}
+}
+
+func versionString() string {
 	rev := ""
 	modified := false
 	if info, ok := debug.ReadBuildInfo(); ok {
@@ -251,7 +374,12 @@ func printWelcome() {
 	if modified && rev != "" {
 		rev += "-dirty"
 	}
-	trace.Info("Running cc-slurm-adapter %s", rev)
+	return rev
+}
+
+func printWelcome() {
+	trace.Info("Initialization complete")
+	trace.Info("Running cc-slurm-adapter %s", versionString())
 }
 
 func jobEventEnqueue(prepMsg []byte) error {
