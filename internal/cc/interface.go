@@ -559,12 +559,17 @@ func (api *CCApi) SyncStats() error {
 		}
 
 		// Filter out unwanted nodes
-
-		if len(config.Config.IgnoreHosts) > 0 {
+		if len(config.Config.HostSettings) > 0 {
 			ccNodeStatsFiltered := make([]types.CCNodeStat, 0)
 			for _, ccNodeStat := range ccNodeStats {
-				if match, _ := regexp.MatchString(config.Config.IgnoreHosts, ccNodeStat.Hostname); !match {
-					// If the host doesn't match the ignored hosts, keep it in the list
+				ignore := false
+				for filterExpr, hostSettings := range config.Config.HostSettings {
+					if match, _ := regexp.MatchString(filterExpr, ccNodeStat.Hostname); match && hostSettings.Ignore {
+						ignore = true
+						break
+					}
+				}
+				if !ignore {
 					ccNodeStatsFiltered = append(ccNodeStatsFiltered, ccNodeStat)
 				}
 			}
@@ -641,6 +646,16 @@ func (api *CCApi) ccGet(relApiUrl string) (*http.Response, error) {
 	return api.httpClient.Do(req)
 }
 
+func checkHostIgnored(host string) bool {
+	for filterExpr, hostSettings := range config.Config.HostSettings {
+		// The validity of filterExpr is checked on start, so no need to check it here
+		if match, _ := regexp.MatchString(filterExpr, host); match && hostSettings.Ignore {
+			return true
+		}
+	}
+	return false
+}
+
 func checkIgnoreJob(job slurm_common.Job) bool {
 	// We may want to filter out certain jobs, that shall not be submitted to cc-backend.
 	// Put more rules here if necessary.
@@ -668,13 +683,12 @@ func checkIgnoreJob(job slurm_common.Job) bool {
 	// If all hosts used in this job don't match the ignore pattern, discard the job.
 	// Accordingly, if at least one host of the job does not match the pattern, the job
 	// is not discarded.
-	if len(config.Config.IgnoreHosts) > 0 {
-		trace.Debug("Checking job %d against ignore hosts list.", job.GetJobId())
+	if len(config.Config.HostSettings) > 0 {
+		trace.Debug("Checking job %d against hosts ignore properties.", job.GetJobId())
 		atLeastOneHostAllowed := false
 		for _, r := range resources {
 			// The validity of the regexp is checked on startup, so no need to check it here.
-			match, _ := regexp.MatchString(config.Config.IgnoreHosts, r.Hostname)
-			if !match {
+			if !checkHostIgnored(r.Hostname) {
 				atLeastOneHostAllowed = true
 				break
 			}

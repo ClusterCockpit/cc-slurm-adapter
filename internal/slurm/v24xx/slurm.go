@@ -951,6 +951,18 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 	scAllocation := j.sc.JobResources.Nodes.Allocation
 	resources := make([]*schema.Resource, 0)
 	for _, allocation := range scAllocation {
+		host := *allocation.Hostname
+
+		// Determine host specific CPU ID mapping
+		var cpuIds [][][]int
+		for filterExpr, hostSettings := range config.Config.HostSettings {
+			if match, _ := regexp.MatchString(filterExpr, host); match {
+				if hostSettings.CpuIDs != nil {
+					cpuIds = hostSettings.CpuIDs
+				}
+			}
+		}
+
 		// Determine Hwthreads
 		hwthreads := make([]int, 0)
 		cpusPerSocket := len(allocation.Sockets[0].Cores)
@@ -959,7 +971,25 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 				if string(*core.Status) != "ALLOCATED" {
 					continue
 				}
-				hwthreads = append(hwthreads, *socket.Index*cpusPerSocket+*core.Index)
+
+				// If provided, use manual cpu ID mapping
+				if cpuIds != nil {
+					sock := *socket.Index
+					if sock >= len(cpuIds) {
+						trace.Fatal("cpuIds for host %s doesn't contain socket %d, which Slurm provided", host, sock)
+					}
+					core := *core.Index
+					if core >= len(cpuIds[sock]) {
+						trace.Fatal("cpuIds for host %s doesn't contain sock/core %d/%d, which Slurm provided", host, sock, core)
+					}
+					threads := cpuIds[sock][core]
+					if len(threads) == 0 {
+						trace.Fatal("cpuIds for host %s sock/core %d/%d has zero threads", host, sock, core)
+					}
+					hwthreads = append(hwthreads, threads...)
+				} else {
+					hwthreads = append(hwthreads, *socket.Index*cpusPerSocket+*core.Index)
+				}
 			}
 		}
 
@@ -972,24 +1002,26 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 			nodeGres, err := ParseGRES(j.sc.GresDetail[*allocation.Index])
 			if err == nil && nodeGres.Variant == "gpu" {
 				found := false
-				for hostRegex, pciAddrList := range config.Config.GpuPciAddrs {
-					// We initially check the regex, so no need to check for errors again.
-					match, _ := regexp.MatchString(hostRegex, *allocation.Hostname)
-					if match {
-						for _, v := range nodeGres.DomainIndices {
-							if v >= len(pciAddrList) {
-								trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *j.sa.JobId, v, len(config.Config.GpuPciAddrs))
-								continue
+				if config.Config.HostSettings != nil {
+					for hostRegex, hostSettings := range config.Config.HostSettings {
+						// We initially check the regex, so no need to check for errors again.
+						match, _ := regexp.MatchString(hostRegex, host)
+						if match {
+							for _, v := range nodeGres.DomainIndices {
+								if v >= len(hostSettings.GpuPciAddrs) {
+									trace.Error("Unable to determine PCI address: Detected GPU in job %d, which is not listed in config file (gresIndex=%d >= len(gpus)=%d)", *j.sa.JobId, v, len(hostSettings.GpuPciAddrs))
+									continue
+								}
+								trace.Debug("Found GPU %d for %s: %s", v, host, hostSettings.GpuPciAddrs[v])
+								accelerators = append(accelerators, hostSettings.GpuPciAddrs[v])
 							}
-							trace.Debug("Found GPU %d for %s: %s", v, *allocation.Hostname, pciAddrList[v])
-							accelerators = append(accelerators, pciAddrList[v])
+							found = true
+							break
 						}
-						found = true
-						break
 					}
 				}
 				if !found {
-					trace.Warn("Unable to find GPU list for hostname=%s from GRES for job %d", *allocation.Hostname, *j.sa.JobId)
+					trace.Warn("Unable to find GPU list for hostname=%s from GRES for job %d", host, *j.sa.JobId)
 				}
 			}
 		} else if *j.sc.Comment != "" {
@@ -999,7 +1031,7 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 
 		// Create final result
 		r := schema.Resource{
-			Hostname:     *allocation.Hostname,
+			Hostname:     host,
 			HWThreads:    hwthreads,
 			Accelerators: accelerators,
 		}

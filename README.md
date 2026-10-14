@@ -110,15 +110,20 @@ Most values are optional, see Reference to see which ones you really need.
     "ccRestSubmitJobs" : true,
     "ccRestUrl": "https://my-cc-backend-instance.example",
     "ccRestJwt": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-    "gpuPciAddrs": {
-        "^nodehostname0[0-9]$": [
-            "00000000:00:10.0",
-            "00000000:00:3F.0"
-        ],
-        "^nodehostname1[0-9]$": [
-            "00000000:00:10.0",
-            "00000000:00:3F.0"
-        ]
+    "hostSettings": {
+        "^nodehostname0[0-9]$": {
+            "cpuIds": [
+                [ [ 0, 1 ], [ 2, 3 ] ],
+                [ [ 4, 5 ], [ 6, 7 ] ]
+            ],
+            "gpuPciAddrs": [
+                "00000000:00:10.0",
+                "00000000:00:3F.0"
+            ],
+        },
+        "^nodehostname1[0-9]$": {
+            "ignore": true
+        }
     },
     "ignoreHosts": "^nodehostname9\\w+$",
     "natsServer": "mynatsserver.example",
@@ -151,7 +156,8 @@ Config Key | Optional | Description
 `ccRestSubmitJobs`  | yes | Submit started/stopped jobs to cc-backend. You can set this to `false` to supress submission of start/stop jobs via REST. This only makes any sense if you have NATS enabled and cc-backend registers start/stop jobs via NATS.
 `ccRestUrl`         | no  | The URL to cc-backend's REST API. Must not contain a trailing slash.
 `ccRestJwt`         | no  | The JWT obtained from cc-backend, which allows access to the REST API.
-`gpuPciAddrs`       | yes | Dictionary of Regexes mapping to a list of PCI addresses. If some of your nodes have GPUs, use this to map the hostnames via regex to a list of GPUs those nodes have. They have to be ordered like NVML shows them, which should hopefully be the same as `nvidia-smi` shows them, if all devices are visible.
+`hostSettings`      | yes | Dictionary of Regexes mapping to a list of host specific settings (see table for host settings below).
+`gpuPciAddrs`       | yes | Dictionary of Regexes mapping to a list of PCI addresses.
 `ignoreHosts`       | yes | Regex of hostnames to ignore. If all hosts that are associated to a job match this regex, the job is discarded and not reported to cc-backend.
 `natsServer`        | yes | Hostname of the NATS server. Leave blank or omit to disable NATS.
 `natsPort`          | yes | Port of the NATS server.
@@ -160,6 +166,14 @@ Config Key | Optional | Description
 `natsPassword`      | yes | Password to be used with the NATS user.
 `natsCredsFile`     | yes | If your NATS server requires a [credentials file](https://docs.nats.io/using-nats/developer/connecting/creds), use this to set the file path.
 `natsNKeySeedFile`  | yes | If your NATS server requires plain [NKey auth](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_intro/nkey_auth), use this to specify the path to the file, which contains the NKey seed (private key).
+
+Host settings table (all values optional):
+
+Config Key | Description
+--- | ---
+`cpuIds` | Triple nested list of integers. Use this list to manually declare the CPU topology (sockets -> cores -> threads -> Operating System CPU ID) for matching hosts. This **must** be specified if you have hosts with SMT enabled (**usually** not if you don't), because Slurm (as of v26.xx) does not expose resource information about SMT thread allocation.
+`gpuPciAddrs` | List of GPU PCI addresses for matching hosts. If some of your nodes have GPUs, use this to list the GPUs those nodes have. They have to be ordered like NVML shows them, which should hopefully be the same as `nvidia-smi` shows them, if all devices are visible.
+`ignore` | If true (boolean), matching hosts are completely ignored.
 
 ## Admin Guide
 

@@ -31,28 +31,34 @@ var (
 	Config ProgramConfig
 )
 
+type HostConfig struct {
+	// CPUIds[socket][core][thread]
+	CpuIDs      [][][]int `json:"cpuIds"`
+	GpuPciAddrs []string  `json:"gpuPciAddrs"`
+	Ignore      bool      `json:"ignore"`
+}
+
 type ProgramConfig struct {
-	PidFilePath         string              `json:"pidFilePath"`
-	PrepSockListenPath  string              `json:"prepSockListenPath"`
-	PrepSockConnectPath string              `json:"prepSockConnectPath"`
-	LastRunPath         string              `json:"lastRunPath"`
-	SlurmPollInterval   int                 `json:"slurmPollInterval"`
-	SlurmQueryDelay     int                 `json:"slurmQueryDelay"`   // TODO give this a better name
-	SlurmQueryMaxSpan   int                 `json:"slurmQueryMaxSpan"` // TODO change the name of this
-	SlurmMaxRetries     int                 `json:"slurmMaxRetries"`
-	CcRestUrl           string              `json:"ccRestUrl"`
-	CcRestJwt           string              `json:"ccRestJwt"`
-	CcRestSubmitJobs    bool                `json:"ccRestSubmitJobs"`
-	CcPollInterval      int                 `json:"ccPollInterval"`
-	GpuPciAddrs         map[string][]string `json:"gpuPciAddrs"`
-	IgnoreHosts         string              `json:"ignoreHosts"`
-	NatsServer          string              `json:"natsServer"`
-	NatsPort            uint16              `json:"natsPort"`
-	NatsSubject         string              `json:"natsSubject"`
-	NatsUser            string              `json:"natsUser"`
-	NatsPassword        string              `json:"natsPassword"`
-	NatsCredsFile       string              `json:"natsCredsFile"`
-	NatsNKeySeedFile    string              `json:"natsNKeySeedFile"`
+	PidFilePath         string                `json:"pidFilePath"`
+	PrepSockListenPath  string                `json:"prepSockListenPath"`
+	PrepSockConnectPath string                `json:"prepSockConnectPath"`
+	LastRunPath         string                `json:"lastRunPath"`
+	SlurmPollInterval   int                   `json:"slurmPollInterval"`
+	SlurmQueryDelay     int                   `json:"slurmQueryDelay"`   // TODO give this a better name
+	SlurmQueryMaxSpan   int                   `json:"slurmQueryMaxSpan"` // TODO change the name of this
+	SlurmMaxRetries     int                   `json:"slurmMaxRetries"`
+	CcRestUrl           string                `json:"ccRestUrl"`
+	CcRestJwt           string                `json:"ccRestJwt"`
+	CcRestSubmitJobs    bool                  `json:"ccRestSubmitJobs"`
+	CcPollInterval      int                   `json:"ccPollInterval"`
+	HostSettings        map[string]HostConfig `json:"hostSettings"`
+	NatsServer          string                `json:"natsServer"`
+	NatsPort            uint16                `json:"natsPort"`
+	NatsSubject         string                `json:"natsSubject"`
+	NatsUser            string                `json:"natsUser"`
+	NatsPassword        string                `json:"natsPassword"`
+	NatsCredsFile       string                `json:"natsCredsFile"`
+	NatsNKeySeedFile    string                `json:"natsNKeySeedFile"`
 }
 
 func Load(configPath string) {
@@ -73,7 +79,7 @@ func Load(configPath string) {
 		SlurmQueryDelay:     DEFAULT_SLURM_QUERY_DELAY,
 		SlurmQueryMaxSpan:   DEFAULT_SLURM_QUERY_MAX_SPAN,
 		SlurmMaxRetries:     DEFAULT_SLURM_MAX_RETRIES,
-		GpuPciAddrs:         make(map[string][]string),
+		HostSettings:        make(map[string]HostConfig),
 		NatsPort:            DEFAULT_NATS_PORT,
 		NatsSubject:         DEFAULT_NATS_SUBJECT,
 	}
@@ -104,17 +110,13 @@ func Load(configPath string) {
 		newConf.SlurmQueryDelay = 1
 	}
 
-	for hostnameRegexp, _ := range newConf.GpuPciAddrs {
-		_, err = regexp.Compile(hostnameRegexp)
-		if err != nil {
-			trace.Fatal("Error in config file: Invalid regex '%s': %v", hostnameRegexp, err)
-		}
-	}
-
-	if len(Config.IgnoreHosts) > 0 {
-		_, err = regexp.Compile(Config.IgnoreHosts)
-		if err != nil {
-			trace.Fatal("Error in config file: Invalid regex '%s': %v", Config.IgnoreHosts, err)
+	if newConf.HostSettings != nil {
+		// Verify if the hostname regexes are actually valid
+		for hostnameRegexp, _ := range newConf.HostSettings {
+			_, err = regexp.Compile(hostnameRegexp)
+			if err != nil {
+				trace.Fatal("Error in config file: Invalid regex '%s': %v", hostnameRegexp, err)
+			}
 		}
 	}
 
