@@ -42,6 +42,7 @@ These versions are known to work:
 
 - 24.xx.x
 - 25.xx.x
+- 26.xx.x
 
 ### Slurm Related Code
 
