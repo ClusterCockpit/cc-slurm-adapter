@@ -958,7 +958,9 @@ func (j *Job) GetResources() ([]*schema.Resource, error) {
 		for filterExpr, hostSettings := range config.Config.HostSettings {
 			if match, _ := regexp.MatchString(filterExpr, host); match {
 				if hostSettings.CpuIDs != nil {
+					trace.Debug("Detecting CPU allocation via configured cpuIds for host '%s'", host)
 					cpuIds = hostSettings.CpuIDs
+					break
 				}
 			}
 		}
