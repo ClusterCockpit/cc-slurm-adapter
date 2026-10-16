@@ -171,7 +171,7 @@ Host settings table (all values optional):
 Config Key | Description
 --- | ---
 `cpuIds` | Triple nested list of integers. Use this list to manually declare the CPU topology (sockets -> cores -> threads -> Operating System CPU ID) for matching hosts. This **must** be specified if you have hosts with SMT enabled (**usually** not if you don't), because Slurm (as of v26.xx) does not expose resource information about SMT thread allocation.
-`gpuPciAddrs` | List of GPU PCI addresses for matching hosts. If some of your nodes have GPUs, use this to list the GPUs those nodes have. They have to be ordered like NVML shows them, which should hopefully be the same as `nvidia-smi` shows them, if all devices are visible.
+`gpuPciAddrs` | List of GPU PCI addresses for matching hosts. If some of your nodes have GPUs, use this to list the GPUs those nodes have. The order of the PCI addresses is **not as you may expect**. Check the Admin Guide below for detailed information.
 `ignore` | If true (boolean), matching hosts are completely ignored.
 
 ## Admin Guide
@@ -275,3 +275,73 @@ That is because the exit code of a Slurm Prolog/Epilog determines whether a job 
 While this allocation failure can be useful for ensuring correct operation, it should not be used in production.
 If for example the cc-slurm-adapter is restarterd or stopped for some time, the Prolog/Epilog calls will fail and will immediately deny all job allocations.
 This is most certainly undesirable in a production instance.
+
+### Configuring GPUs
+
+#### General
+
+Because cc-backend, where we submit our jobs to, addresses GPUs by PCI address, cc-slurm-adapter needs some way to obtain them.
+Slurm doesn't provide this information via it's normal JSON API, so you have to specify them manually in the `hostSettings`/`gpuPciAddrs` array.
+Though, just putting the PCI addresses in the order of nvidia-smi or ascending address order is unfortunately **not sufficient**.
+
+#### Case 1: GPU gres is configured manually
+
+Let's assume your GPUs are manually specified in your gres config like this:
+
+```
+NodeName=mynode Name=gpu Type=h100 File=/dev/nvidia1 CPUs=0-63
+NodeName=mynode Name=gpu Type=h100 File=/dev/nvidia0 CPUs=0-63
+NodeName=mynode Name=gpu Type=h100 File=/dev/nvidia3 CPUs=64-127
+NodeName=mynode Name=gpu Type=h100 File=/dev/nvidia2 CPUs=64-127
+```
+
+Then you need to put the PCI addresses for the GPUs in the order specified there.
+You can find our the mapping of /dev/nvidiaX to PCI address with `nvidia-smi -q`.
+Please take note that this is *sometimes*, but **not always** sorted by PCI address.
+
+Let's assume an `nvidia-smi -q` output like this:
+
+```
+GPU 00000000:06:00.0
+    ...
+    Minor Number                                       : 2
+    ...
+GPU 00000000:26:00.0
+    ...
+    Minor Number                                       : 0
+    ...
+GPU 00000000:A6:00.0
+    ...
+    Minor Number                                       : 3
+    ...
+GPU 00000000:C6:00.0
+    ...
+    Minor Number                                       : 1
+    ...
+```
+
+The number `X` in `/dev/nvidiaX` corresponds to the `Minor Number` found in the output above.
+In our case this would result in this order:
+
+```json
+[
+    "00000000:C6:00.0",
+    "00000000:26:00.0",
+    "00000000:A6:00.0",
+    "00000000:06:00.0"
+]
+```
+
+#### Case 2: GPU gres is configured with AutoDetect=nvml
+
+If you do not manually specify `File=/dev/nvidiaX` in your gres configuration, the PCI addresses must be ordered by `Minor Number` (aka `X` in `/dev/nvidiaX`) directly, as shown in the output of *Case 1* above.
+In that case the resulting PCI address list would be this:
+
+```json
+[
+    "00000000:26:00.0",
+    "00000000:C6:00.0",
+    "00000000:06:00.0",
+    "00000000:A6:00.0"
+]
+```
