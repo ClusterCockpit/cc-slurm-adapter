@@ -158,8 +158,6 @@ Config Key | Optional | Description
 `ccRestUrl`         | no  | The URL to cc-backend's REST API. Must not contain a trailing slash.
 `ccRestJwt`         | no  | The JWT obtained from cc-backend, which allows access to the REST API.
 `hostSettings`      | yes | Dictionary of Regexes mapping to a list of host specific settings (see table for host settings below).
-`gpuPciAddrs`       | yes | Dictionary of Regexes mapping to a list of PCI addresses.
-`ignoreHosts`       | yes | Regex of hostnames to ignore. If all hosts that are associated to a job match this regex, the job is discarded and not reported to cc-backend.
 `natsServer`        | yes | Hostname of the NATS server. Leave blank or omit to disable NATS.
 `natsPort`          | yes | Port of the NATS server.
 `natsSubject`       | yes | Subject to which publish job information to.
