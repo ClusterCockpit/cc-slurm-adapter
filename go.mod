@@ -2,7 +2,7 @@ module github.com/ClusterCockpit/cc-slurm-adapter
 
 go 1.26.0
 
-require github.com/ClusterCockpit/cc-lib/v2 v2.17.0
+require github.com/ClusterCockpit/cc-lib/v2 v2.18.0
 
 require (
 	github.com/ClusterCockpit/cc-line-protocol/v2 v2.4.0 // indirect

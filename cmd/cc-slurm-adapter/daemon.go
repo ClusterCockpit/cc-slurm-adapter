@@ -19,7 +19,7 @@ import (
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/prep"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/profiler"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm"
-	"github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
+	slurm_common "github.com/ClusterCockpit/cc-slurm-adapter/internal/slurm/common"
 	"github.com/ClusterCockpit/cc-slurm-adapter/internal/trace"
 
 	"github.com/ClusterCockpit/cc-lib/v2/fleet"
@@ -199,7 +199,7 @@ func daemonInit(ctx context.Context, prepEventChan chan []byte) error {
 		}
 	}
 
-	err = os.WriteFile(config.Config.PidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	err = os.WriteFile(config.Config.PidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
 	if err != nil {
 		return fmt.Errorf("Unable to create pid file: %w", err)
 	}
@@ -320,37 +320,17 @@ func fleetInit(ctx context.Context) error {
 	}
 	fleetConfigChan = fleetClient.Configs()
 
-	update, err := fleetClient.Bootstrap(ctx, FLEET_BOOTSTRAP_TIMEOUT)
-	if err != nil {
-		trace.Warn("fleet: Bootstrap failed, retrying in background: %v", err)
-		if update.Source == fleet.SourceCache {
-			trace.Warn("fleet: Using cached fleet configuration from '%s'", config.Config.FleetConfigCachePath)
-		}
-	} else if cluster != "" {
-		trace.Info("fleet: Registered as %s for cluster '%s'", fleet.ServiceSlurmAdapter, cluster)
-	} else {
-		trace.Info("fleet: Registered as %s (infra scope)", fleet.ServiceSlurmAdapter)
-	}
-
+	// Bootstrap logs its outcome. On failure it returns the cached configuration (if any)
+	// and Run keeps trying to register in the background.
+	update, _ := fleetClient.Bootstrap(ctx, FLEET_BOOTSTRAP_TIMEOUT)
 	applyFleetConfig(update.Config, true)
 	return nil
 }
 
 func applyFleetConfig(blob []byte, startup bool) {
-	changed, restartRequired, err := config.ApplyFleet(blob, startup)
+	err := config.ApplyFleet(blob, startup)
 	if err != nil {
 		trace.Error("fleet: Rejecting fleet configuration, keeping previous configuration: %v", err)
-		return
-	}
-
-	if len(changed) > 0 {
-		trace.Info("fleet: Applied configuration. Changed keys: %v", changed)
-	} else {
-		trace.Debug("fleet: Applied configuration. No keys changed.")
-	}
-
-	if len(restartRequired) > 0 {
-		trace.Warn("fleet: Configuration keys %v changed, but only take effect after restarting the daemon", restartRequired)
 	}
 }
 
@@ -576,7 +556,7 @@ func lastRunGet() time.Time {
 
 func lastRunSet(timeStamp time.Time) {
 	trace.Debug("lastRunSet")
-	f, err := os.OpenFile(config.Config.LastRunPath, os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(config.Config.LastRunPath, os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		trace.Fatal("Unable to set time of last run: %s", err)
 	}
