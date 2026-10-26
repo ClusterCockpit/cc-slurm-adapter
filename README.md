@@ -296,7 +296,7 @@ NodeName=mynode Name=gpu Type=h100 File=/dev/nvidia2 CPUs=64-127
 ```
 
 Then you need to put the PCI addresses for the GPUs in the order specified there.
-You can find our the mapping of /dev/nvidiaX to PCI address with `nvidia-smi -q`.
+You can find out the mapping of /dev/nvidiaX to PCI address with `nvidia-smi -q`.
 Please take note that this is *sometimes*, but **not always** sorted by PCI address.
 
 Let's assume an `nvidia-smi -q` output like this:
